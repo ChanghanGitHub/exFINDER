@@ -1,11 +1,22 @@
 Package: exFINDER
 Type: Package
-Title: What the Package Does (Title Case)
-Version: 0.1.0
-Author: Who wrote it
-Maintainer: The package maintainer <yourself@somewhere.net>
-Description: More about what it does (maybe more than one line)
-    Use four spaces when indenting paragraphs within the Description.
-License: What license is it under?
+Title: exFINDER: identify external communication signals using single-cell transcriptomics data (Title Case)
+Version: 1.0.0
+Author: person("Changhan", "He", , "changhanhe@gmail.com", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0002-1349-0075"))
+Maintainer: The package maintainer <changhanhe@gmail.com>
+Description: exFINDER identifies external signals received by the cells in the single-cell transcriptomics datasets by utilizing the prior knowledge of signaling pathways. In particular, exFINDER can uncover external signals that activate the given target genes, infer the external signal-target signaling network (exSigNet), and perform quantitative analysis on exSigNets. 
+License: GPL-3
 Encoding: UTF-8
-LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.2
+Depends: R (>= 4.0.0)
+Imports:
+    clusterProfiler,
+    igraph,
+    pheatmap,
+    stringr,
+    org.Mm.eg.db,
+    org.Hs.eg.db,
+    org.Dr.eg.db,
+    stats
