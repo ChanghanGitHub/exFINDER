@@ -1,0 +1,619 @@
+---
+title: "exFINDER: identify external communication signals using single-cell transcriptomics data"
+author: "Changhan He"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    theme: united
+mainfont: Arial
+vignette: >
+  %\VignetteIndexEntry{exFINDER: identify external communication signals using single-cell transcriptomics data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  root.dir = './'
+)
+#knitr::opts_chunk$set(eval = FALSE)
+```
+
+
+This vignette outlines the steps of applying exFINDER to zebrafish single-cell transcriptomics data on: (1) identifying external signals associated to the differentiation from earlyNC cells to skeletal and pigment cells; (2) inferring and analyzing the external signal-target signaling network (exSigNet); (3) visualizing the results.  
+
+
+## Load the required libraries
+```{r message=FALSE,warning=FALSE}
+library(exFINDER)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(RColorBrewer)
+```
+
+
+# Part I: Data input & processing & visualizing
+exFINDER requires two user inputs: one is the gene expression data of cells, and the other is either user assigned cell labels.   
+
+*For the gene expression data matrix*, genes should be in rows with rownames and cells in columns with colnames. Normalized data is required as input for CellChat analysis. 
+
+```{r}
+# load complete dataset with cell labels
+Data1 <- readRDS("/Users/chang/Documents/exFINDER/testdata/Tatarakis2021_Zebrafish_Arch1_aggregate_unfiltered.RDS")
+Data1@meta.data$Type <- as.factor(Data1@meta.data$guided_cell_type)
+
+# load NC-cell dataset with cell labels
+Data2 <- readRDS("/Users/chang/Documents/exFINDER/testdata/Tatarakis2021_Zebrafish_Arch1_new_aggregate_filtered_noNT.RDS")
+celltypes <- as.factor( read.csv(file = '/Users/chang/Documents/exFINDER/testdata/Tatarakis2021_Zebrafish_Arch1_new_aggregate_filtered_noNT_celltypes.csv')[,2] )
+Data2@meta.data$Type <- celltypes
+```
+
+
+```{r}
+# select non-NC cells according to the paper: Tatarakis D et al. Cell reports, 2021, 37(12): 110140. (Fig. 1C)
+Data1 <- subset(x = Data1, subset = (Type == "earlyNC" | 
+                                       Type == "Endothelium" | 
+                                       Type == "Epithelium" | 
+                                       Type == "Heart primordium"| 
+                                       Type ==  "neural_glial" | 
+                                       Type == "NT" |
+                                       Type == "other" |
+                                       Type == "pigment" |
+                                       Type == "skeletal" |
+                                       Type == "unassigned"))
+
+# merge "other" and "unassigned" to "transition"
+library(forcats)
+
+Data1@meta.data$Type <- fct_collapse(Data1@meta.data$Type, "transition"=c("other","unassigned"))
+Data1@meta.data$Type <- fct_collapse(Data1@meta.data$Type, "Heart_primordium"="Heart primordium")
+Data1@meta.data$Type <- fct_drop(Data1@meta.data$Type)
+Data2@meta.data$Type <- fct_collapse(Data2@meta.data$Type, "transition"=c("other","unassigned"))
+```
+
+
+```{r, fig.width=6,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
+# visualze the complete dataset
+DimPlot(object = Data1, group.by = "Type", pt.size = 0.75)
+```
+
+
+
+
+```{r, fig.width=5,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
+# visualze the NC-cell dataset
+DimPlot(object = Data2, group.by = "Type", pt.size = 0.75)
+```
+
+
+
+```{r}
+# if needed, users can discover and save marker genes of each cluster by running this chunk (optional)
+
+# Type <- levels(Data1@meta.data$Type)
+# n <- length(Type)
+# Data1.marker <- c()
+# 
+# for (i in 1:n) {
+#   cluster.markers <- FindMarkers(Data1, 
+#                                  ident.1 = Type[i] , 
+#                                  group.by = "Type", 
+#                                  only.pos = TRUE, 
+#                                  min.pct = 0.25,
+#                                  logfc.threshold = 0.25)
+#   
+#   cluster.markers %>%
+#     slice_max(order_by = -p_val)
+#   cluster.markers <- cluster.markers[1:100,]
+#   
+#   Data1.marker <- c(Data1.marker, rownames(cluster.markers[1:10, ]))
+#   
+#   write.csv(x = cluster.markers , file = paste("markers_",Type[i],".csv",sep=""))
+# }
+```
+
+
+
+```{r, fig.width=6,fig.height = 8, fig.wide = TRUE, fig.align = "center"}
+# if all marker genes are saved, we can directly load and visualize 
+Type <- levels(Data1@meta.data$Type)
+n <- length(Type)
+Data1@active.ident <- Data1@meta.data$Type
+Data1.marker <- c()
+
+for (i in 1:n) {
+  cluster.markers <- read.csv(file = paste("../markers/Tatarakis2021_Zebrafish_marker/Tatarakis2021_Zebrafish_markers_",Type[i],".csv",sep="")) 
+  
+  cluster.markers <- cluster.markers$X[1:10]
+  
+  Data1.marker <- c(Data1.marker, cluster.markers)
+}
+
+DoHeatmap(Data1, features = Data1.marker) + NoLegend() +
+  scale_fill_gradientn(colors = c("#377EB8", "white", "#E41A1C"))
+```
+
+## Part II: Loading exFINDER database (and optional ligand-receptor database)
+
+*exFINDER database* is available for human, mouse, and zebrafish. *ligand-receptor database* is used for inferring functionally related signaling pathways from the exSigNet, here we use the ligand-receptor database from CellChat.
+
+```{r}
+# load exFINDER database
+load("../data/LR_layer1_zebrafish.rda")
+load("../data/RTF_layer2_zebrafish.rda")
+load("../data/TFT_layer3_zebrafish.rda")
+
+exFINDER.Z <- list()
+exFINDER.Z[[1]] <- LR_layer1_zebrafish
+exFINDER.Z[[2]] <- RTF_layer2_zebrafish
+exFINDER.Z[[3]] <- TFT_layer3_zebrafish
+```
+
+
+```{r}
+# load CellChatDB 
+# CellChatLR.human = load("../data/interaction_input_CellChatDB_human.rda")
+# CellChatLR.mouse = load("../data/interaction_input_CellChatDB_mouse.rda")
+load("../data/interaction_input_CellChatDB_zebrafish.rda")
+```
+
+## Prepare the inputs for exFINDER analysis
+
+```{r}
+exp.data <- Data2@assays$RNA@data
+meta.data <- Data2@meta.data
+
+# the complete dataset contains the data of non-NC cells, which are defined as "external cells"
+exp.Exdata <- Data1@assays$RNA@data
+meta.Exdata <- Data1@meta.data
+```
+
+
+# Part III: identifying external signals that come from NON-NC cells targeting skeletal cells
+To identify differentiation-associated external signals, we select the marker genes of skeletal cells (one of the differentiated cell groups) as our target genes. However, the target genes *do not have to be* marker genes.
+
+
+## setup target genes and infer ltGRN
+```{r}
+marker <- read.csv(file = "../markers/Tatarakis2021_Zebrafish_marker/Tatarakis2021_Zebrafish_markers_skeletal.csv")
+target.gene <- marker$X[1:10]
+
+ltGRN <- get_ltGRN(Target = target.gene, DB = exFINDER.Z)
+```
+
+
+## identify external signals and infer exSigNet
+```{r}
+# infer potential external signals from ltGRN
+Pex <- get_potentialex(Graph = ltGRN,
+                Exp.Data = exp.data,
+                Meta.Data = meta.data,
+                cutoff = -0.15,
+                AG.L = NULL)
+head(Pex)
+```
+
+
+
+```{r}
+# infer exSigNet (R, TF, T are all highly expressed, L comes from the potential external signals)
+exSigNet <- get_exSigNet(Graph = ltGRN,
+                       Ligands = Pex,
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(2, 2), 
+                       AG.R = c("skeletal", "transition"),
+                       AG.TF = c('skeletal'))
+
+exSigNet
+```
+
+
+
+```{r, fig.width=6,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
+# check the inferred external signals and their expressions via heatmap
+exS <- exSigNet$Graph.Node$Gene[exSigNet$Graph.Node$Role == "Ligand"]
+
+get_heatmap(Gene = exS,
+            Exp.Data = exp.Exdata,
+            Meta.Data = meta.Exdata)
+```
+
+
+
+
+```{r}
+# select the external signals that expressed by non-NC cells and infer the corresponding exSigNet
+exSigNet <- get_exSigNetExData(Graph = exSigNet,
+                                 Exp.ExData = exp.Exdata,
+                                 Meta.ExData = meta.Exdata,
+                                 cutoff.ExData = 0.5,
+                                 AG.ExData = c('Endothelium','Epithelium','Heart_primordium','NT'))
+exSigNet
+```
+
+
+```{r}
+# calculate the expression levels
+exSigNet <- get_NodeValue(Graph = exSigNet,
+                          Exp.Data = exp.Exdata,
+                          Meta.Data = meta.Exdata,
+                          AG.R = c("skeletal", "transition"),
+                          AG.TF = c('skeletal'),
+                          AG.T = c('skeletal'),
+                          Exp.ExData = NULL,
+                          Meta.ExData = NULL,
+                          AG.ExData = NULL)
+
+# predict signaling strengths
+exSigNet <- get_EdgeWeight(Graph = exSigNet, 
+               Kh = 2)
+```
+
+
+### visualize the exSigNet via heatmap plot
+```{r}
+# prepare the dataframe for heatmap plot
+exS_exp <- get_AveExp(Gene = exSigNet$Graph.Node$Gene,
+           Exp.Data = exp.Exdata,
+           Meta.Data = meta.Exdata)
+
+exS_exp.HP <- exS_exp
+exS_exp.HP <- exS_exp.HP[, -1]
+row.names(exS_exp.HP) <- exS_exp$Gene
+
+exS_exp.HP <- data.frame("Endothelium" = exS_exp.HP$Endothelium,
+                     "Epithelium" = exS_exp.HP$Epithelium, 'Heart_primordium' = exS_exp.HP$`Heart_primordium`,
+                     "NT" = exS_exp.HP$NT,
+                     "earlyNC" = exS_exp.HP$earlyNC, "transition" = exS_exp.HP$transition,
+                     "neural_glial" = exS_exp.HP$neural_glial, 
+                     "pigment" = exS_exp.HP$pigment, "skeletal" = exS_exp.HP$skeletal)
+row.names(exS_exp.HP) <- exS_exp$Gene
+
+exS_exp.HP
+```
+
+
+```{r}
+# customize the row labels and col labels
+annotation_col = data.frame(
+  CellType = c("non-NC cell", "non-NC cell", "non-NC cell", "non-NC cell", "NC cell", "NC cell", "NC cell", "NC cell", "NC cell"))
+rownames(annotation_col) = colnames(exS_exp.HP)
+
+annotation_row <- data.frame(Role = exSigNet$Graph.Node$Role)
+row.names(annotation_row) <- row.names(exS_exp.HP)
+```
+
+
+
+```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+# heatmap plot
+library(pheatmap)
+
+pheatmap(exS_exp.HP,
+         cluster_row = FALSE, cluster_cols = FALSE, 
+         cellwidth = 12, cellheight = 12,
+         gaps_row = c(2, 4, 5),
+         fontsize_row = 10,
+         fontsize_col = 10,
+         annotation_row = annotation_row,
+         annotation_col = annotation_col)
+```
+
+
+
+### visualize the exSigNet via hierarchy plot
+
+```{r}
+# prepare for hierarchy plot
+Graph <- exSigNet
+
+hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
+all_leaves <- Graph$Graph.Node$Gene
+
+connect <- data.frame(from = Graph$Graph.Edge$from, to = Graph$Graph.Edge$to)
+connect$value <- Graph$Graph.Edge$Weight
+
+vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))),
+                       Expression = c(0, Graph$Graph.Node$Size)) 
+vertices$node <- c(" ", Graph$Graph.Node$Gene)
+vertices$Role <- c("NA", Graph$Graph.Node$Role)
+
+mygraph <- igraph::graph_from_data_frame( hierarchy, vertices=vertices )
+
+from <- match( connect$from, vertices$name)
+to <- match( connect$to, vertices$name)
+weight <- connect$value
+
+```
+
+
+```{r, fig.width=8,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
+# hierarchy plot
+library(ggraph)
+
+ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+  geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
+  theme_void() +
+  geom_conn_bundle(data = get_con(from = from, to = to, Strength = weight), width = 1.0, aes(colour=Strength), 
+                   arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
+  scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
+  geom_node_text(aes(label = node)) +
+  scale_size_continuous( range = c(0.1,10) )
+
+```
+
+
+# Part IV: identifying external signals that come from external environment targeting skeletal cells
+Here, *come from external environment* means very low (or zero) expressions in the measured cells (NC and non-NC cells).
+
+## setup target genes and infer ltGRN
+```{r}
+marker <- read.csv(file = "../markers/Tatarakis2021_Zebrafish_marker/Tatarakis2021_Zebrafish_markers_skeletal.csv")
+target.gene2 <- marker$X[11:20]
+
+ltGRN.2 <- get_ltGRN(Target = target.gene2, DB = exFINDER.Z)
+```
+
+
+## identify external signals and infer exSigNet
+```{r}
+# infer potential external signals from ltGRN.2: low expression in measured cells
+Pex.2 <- get_potentialex(Graph = ltGRN.2,
+                Exp.Data = exp.Exdata,
+                Meta.Data = meta.Exdata,
+                cutoff = -0.15,
+                AG.L = NULL)
+head(Pex.2)
+```
+
+
+
+```{r}
+# infer exSigNet.2 (R, TF, T are all highly expressed, L comes from the potential external signals)
+exSigNet.2 <- get_exSigNet(Graph = ltGRN.2,
+                       Ligands = Pex.2,
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(1, 1), 
+                       AG.R = c("skeletal", "transition"),
+                       AG.TF = c('skeletal'))
+# exSigNet.2
+```
+
+
+```{r}
+# based on this "exSigNet.2", we identify the receptors that only activated by these external signals 
+exSigNet.2 <- filterLR_exSigNet(Graph = exSigNet.2,
+                  Exp.Data = exp.Exdata,
+                  DB = exFINDER.Z)
+# exSigNet.2
+```
+
+
+```{r, fig.width=5,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+# check the inferred external signals and their expressions via heatmap
+exS.2 <- exSigNet.2$Graph.Node$Gene[exSigNet.2$Graph.Node$Role == "Ligand"]
+
+get_heatmap(Gene = exS.2,
+            Exp.Data = exp.Exdata,
+            Meta.Data = meta.Exdata)
+```
+
+
+```{r}
+# calculate the expression levels
+exSigNet.2 <- get_NodeValue(Graph = exSigNet.2,
+                          Exp.Data = exp.Exdata,
+                          Meta.Data = meta.Exdata,
+                          AG.R = c("skeletal", "transition"),
+                          AG.TF = c('skeletal'),
+                          AG.T = c('skeletal'),
+                          Exp.ExData = NULL,
+                          Meta.ExData = NULL,
+                          AG.ExData = NULL)
+
+# predict signaling strengths
+exSigNet.2 <- get_EdgeWeight(Graph = exSigNet.2, 
+               Kh = 2)
+```
+
+
+### visualize the exSigNet via heatmap plot
+```{r}
+# prepare the dataframe for heatmap plot
+exS.2_exp <- get_AveExp(Gene = exSigNet.2$Graph.Node$Gene,
+           Exp.Data = exp.Exdata,
+           Meta.Data = meta.Exdata)
+
+
+exS.2_exp.HP <- exS.2_exp
+exS.2_exp.HP <- exS.2_exp.HP[, -1]
+row.names(exS.2_exp.HP) <- exS.2_exp$Gene
+exS.2_exp.HP
+
+exS.2_exp.HP <- data.frame("Endothelium" = exS.2_exp.HP$Endothelium,
+                     "Epithelium" = exS.2_exp.HP$Epithelium, 'Heart_primordium' = exS.2_exp.HP$`Heart_primordium`,
+                     "NT" = exS.2_exp.HP$NT,
+                     "earlyNC" = exS.2_exp.HP$earlyNC, "transition" = exS.2_exp.HP$transition,
+                     "neural_glial" = exS.2_exp.HP$neural_glial, 
+                     "pigment" = exS.2_exp.HP$pigment, "skeletal" = exS.2_exp.HP$skeletal)
+row.names(exS.2_exp.HP) <- exS.2_exp$Gene
+
+exS.2_exp.HP
+```
+
+
+```{r}
+# customize the row labels and col labels
+annotation_col = data.frame(
+  CellType = c("non-NC cell", "non-NC cell", "non-NC cell", "non-NC cell", "NC cell", "NC cell", "NC cell", "NC cell", "NC cell"))
+rownames(annotation_col) = colnames(exS.2_exp.HP)
+
+annotation_row <- data.frame(Role = exSigNet.2$Graph.Node$Role)
+row.names(annotation_row) <- row.names(exS.2_exp.HP)
+```
+
+
+```{r, fig.width=4,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
+# heatmap plot
+library(pheatmap)
+
+pheatmap(exS.2_exp.HP,
+         cluster_row = FALSE, cluster_cols = FALSE, 
+         cellwidth = 12, cellheight = 12,
+         gaps_row = c(4, 6, 11),
+         fontsize_row = 10,
+         fontsize_col = 10,
+         annotation_row = annotation_row,
+         annotation_col = annotation_col)
+```
+
+
+### visualize the exSigNet via hierarchy plot
+
+```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+# prepare for hierarchy plot
+Graph <- exSigNet.2
+
+hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
+all_leaves <- Graph$Graph.Node$Gene
+
+connect <- data.frame(from = Graph$Graph.Edge$from, to = Graph$Graph.Edge$to)
+connect$value <- Graph$Graph.Edge$Weight
+
+vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))),
+                       Expression = c(0, Graph$Graph.Node$Size)) 
+vertices$node <- c(" ", Graph$Graph.Node$Gene)
+vertices$Role <- c("NA", Graph$Graph.Node$Role)
+
+mygraph <- igraph::graph_from_data_frame( hierarchy, vertices=vertices )
+
+from <- match( connect$from, vertices$name)
+to <- match( connect$to, vertices$name)
+weight <- connect$value
+
+```
+
+
+```{r, fig.width=8,fig.height = 7, fig.wide = TRUE, fig.align = "center"}
+# hierarchy plot
+ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+  geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
+  theme_void() +
+  geom_conn_bundle(data = get_con(from = from, to = to, Strength = weight), width = 0.7, aes(colour=Strength),
+                   arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
+  scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
+  geom_node_text(aes(label = node)) +
+  scale_size_continuous( range = c(0.1,10) )
+```
+
+# Part IV: infer the critical transition signal-related exSigNet
+*critical transition signals (CTS)* refer to a group of transcription factors (TFs) that drive the critial transition. Here we infer the exSigNet that: (1) activated by the ligands that come from ecternal environment; (2) the TFs are critical transition signals; (3) the target genes are marker genes of skeletal and pigment cells.
+
+## load CTS and set-up target genes
+```{r}
+CTS.Z <- read.csv(file = "/Users/chang/Documents/exFINDER/testdata/Tatarakis2021_Zebrafish_CTS.csv")
+
+markerS <- read.csv(file = "../markers/Tatarakis2021_Zebrafish_marker/Tatarakis2021_Zebrafish_markers_skeletal.csv")
+markerP <- read.csv(file = "../markers/Tatarakis2021_Zebrafish_marker/Tatarakis2021_Zebrafish_markers_pigment.csv")
+target.SP <- c(markerS$X[1:5], markerP$X[1:5])
+```
+
+
+## infer exSigNet (denoted as exSigNet.4)
+```{r}
+# infer ltGRN
+ltGRN.3 <- get_ltGRN(Target = target.SP, DB = exFINDER.Z)
+```
+
+
+```{r}
+# infer potential external signals from ltGRN
+Pex.3 <- get_potentialex(Graph = ltGRN.3,
+                Exp.Data = exp.Exdata,
+                Meta.Data = meta.Exdata,
+                cutoff = -0.01,
+                AG.L = NULL)
+
+# infer exSigNet (R, TF, T are all highly expressed, L comes from the potential external signals)
+exSigNet.3 <- get_exSigNet(Graph = ltGRN.3,
+                       Ligands = Pex.3,
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(0.5, 0.01), 
+                       AG.R = c("skeletal", "transition", "pigment"),
+                       AG.TF = c("skeletal", "transition", "pigment"))
+```
+
+
+
+
+```{r}
+# if overlap is detected in an exSigNet, we shall fix it by running "fix_Overlap" 
+exSigNet.3 <- fix_OverLap(exSigNet.3)
+```
+
+
+```{r}
+# check what CTS are inferred in the exSigNet
+intersect(exSigNet.3$Graph.Node$Gene[exSigNet.3$Graph.Node$Role == "TF"], CTS.Z$x)
+```
+
+
+```{r}
+# infer the exSigNet that all TFs are CTS by running "get_subNet"
+exSigNet.4 <- get_subNet(Graph = exSigNet.3,
+           TF = c("tal1", "lmo2"))
+exSigNet.4
+```
+
+
+## visualization
+```{r, fig.width=6,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
+library(igraph)
+library(RColorBrewer)
+
+exSigNet.4$Graph.Node$Role[exSigNet.4$Graph.Node$Gene %in% c("slc45a2", "pts")] = "Target (pigment)"
+exSigNet.4$Graph.Node$Role[exSigNet.4$Graph.Node$Gene %in% c("twist1a", "fibina", "dlx2a")] = "Target (skeletal)"
+
+actors <- data.frame(
+  name = exSigNet.4$Graph.Node$Gene,
+  role = exSigNet.4$Graph.Node$Role
+)
+
+relations <- data.frame(
+  from = exSigNet.4$Graph.Edge$from,
+  to = exSigNet.4$Graph.Edge$to
+)
+
+g <- graph_from_data_frame(
+  relations, directed = TRUE,
+  vertices = actors
+)
+
+l <- layout_with_gem(g) 
+
+coul  <- brewer.pal(5, "Set2") 
+# Create a vector of color
+my_color <- coul[as.numeric(as.factor(V(g)$role))]
+
+# pdf("CTS_Z_Network.pdf")
+plot(g, layout=l, vertex.color=my_color)
+```
+
+
+
+
+
+
+
+
+
+
+
+

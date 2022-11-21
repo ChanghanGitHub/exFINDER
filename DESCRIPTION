@@ -11,6 +11,8 @@ Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.2.2
 Depends: R (>= 4.0.0)
+LazyData: true
+LazyDataCompression:xz
 Imports:
     clusterProfiler,
     igraph,
@@ -19,4 +21,13 @@ Imports:
     org.Mm.eg.db,
     org.Hs.eg.db,
     org.Dr.eg.db,
-    stats
+    stats,
+    Seurat,
+    forcats,
+    ggraph,
+    RColorBrewer,
+    qpdf
+Suggests: 
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
