@@ -43,11 +43,14 @@ exFINDER requires two user inputs: one is the gene expression data of cells, and
 
 ```{r}
 # load complete dataset with cell labels
+# this dataset can be download from: https://figshare.com/s/2a674f8342abdf195fb6 
 Data1 <- readRDS("/Users/chang/Documents/exFINDER/testdata/Tatarakis2021_Zebrafish_Arch1_aggregate_unfiltered.RDS")
 Data1@meta.data$Type <- as.factor(Data1@meta.data$guided_cell_type)
 
 # load NC-cell dataset with cell labels
+# this dataset can be download from: https://figshare.com/s/54cc0e83f734995d8d2e
 Data2 <- readRDS("/Users/chang/Documents/exFINDER/testdata/Tatarakis2021_Zebrafish_Arch1_new_aggregate_filtered_noNT.RDS")
+# this dataset can be download from: https://figshare.com/s/6538f43bf233abd9f288 
 celltypes <- as.factor( read.csv(file = '/Users/chang/Documents/exFINDER/testdata/Tatarakis2021_Zebrafish_Arch1_new_aggregate_filtered_noNT_celltypes.csv')[,2] )
 Data2@meta.data$Type <- celltypes
 ```
