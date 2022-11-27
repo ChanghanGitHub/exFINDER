@@ -364,7 +364,7 @@ pre code {
 <h1 class="title toc-ignore">exFINDER: identify external communication
 signals using single-cell transcriptomics data</h1>
 <h4 class="author">Changhan He</h4>
-<h4 class="date">21 November, 2022</h4>
+<h4 class="date">26 November, 2022</h4>
 
 </div>
 
@@ -444,11 +444,14 @@ cells, and the other is either user assigned cell labels.</p>
 with rownames and cells in columns with colnames. Normalized data is
 required as input for CellChat analysis.</p>
 <pre class="r"><code># load complete dataset with cell labels
+# this dataset can be download from: https://figshare.com/s/2a674f8342abdf195fb6 
 Data1 &lt;- readRDS(&quot;/Users/chang/Documents/exFINDER/testdata/Tatarakis2021_Zebrafish_Arch1_aggregate_unfiltered.RDS&quot;)
 Data1@meta.data$Type &lt;- as.factor(Data1@meta.data$guided_cell_type)
 
 # load NC-cell dataset with cell labels
+# this dataset can be download from: https://figshare.com/s/54cc0e83f734995d8d2e
 Data2 &lt;- readRDS(&quot;/Users/chang/Documents/exFINDER/testdata/Tatarakis2021_Zebrafish_Arch1_new_aggregate_filtered_noNT.RDS&quot;)
+# this dataset can be download from: https://figshare.com/s/6538f43bf233abd9f288 
 celltypes &lt;- as.factor( read.csv(file = &#39;/Users/chang/Documents/exFINDER/testdata/Tatarakis2021_Zebrafish_Arch1_new_aggregate_filtered_noNT_celltypes.csv&#39;)[,2] )
 Data2@meta.data$Type &lt;- celltypes</code></pre>
 <pre class="r"><code># select non-NC cells according to the paper: Tatarakis D et al. Cell reports, 2021, 37(12): 110140. (Fig. 1C)
