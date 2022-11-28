@@ -81,6 +81,8 @@ get_ltGRN <- function(Target,
 #' @param Meta.Data meta data of the expression matrix, must have a variable "Type" containing all cell labels
 #' @param cutoff a threshold to filter the ligands. Negative cutoff value: selecting the ligands below this threshold; zero cutoff value: keep all ligands; otherwise selecting the ligands above this threshold
 #' @param AG.L list of cell groups that forces exFINDER to filter the ligands based on these cell groups (optional)
+#' @importFrom stringr str_c
+#' @importFrom magrittr %>%
 #'
 #' @return
 #' @export

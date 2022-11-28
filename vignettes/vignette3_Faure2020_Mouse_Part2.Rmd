@@ -1,0 +1,816 @@
+---
+title: "exFINDER predicts the roles of external signals and uncovers transition paths in differentiation"
+author: "Changhan He"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    theme: united
+mainfont: Arial
+vignette: >
+  %\VignetteIndexEntry{exFINDER predicts the roles of external signals and uncovers transition paths in differentiation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  root.dir = './'
+)
+#knitr::opts_chunk$set(eval = FALSE)
+```
+
+
+This vignette outlines the steps of applying exFINDER to mouse single-cell transcriptomics data on predicting the roles of external signals and uncovering transition paths in differentiation. 
+
+## Load the required libraries
+```{r message=FALSE,warning=FALSE}
+library(exFINDER)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(RColorBrewer)
+library(dplyr)
+library(pheatmap)
+library(ggraph)
+```
+
+
+# Part I: Data input & processing & visualizing
+
+```{r}
+# this Seurat object is converted from the pagoda2 object 
+# and can be downloaded from: https://figshare.com/s/45e0f717eb45a874ad3a 
+Mdata <- readRDS("/Users/chang/Documents/exFINDER/testdata/Faure2020_Mouse_GSE150150_p2w_sensory_Seurat.rds") 
+Mdata = UpdateSeuratObject(object = Mdata)
+Data1 <- Mdata
+```
+
+
+```{r, fig.width=6,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
+# visualze the dataset
+DimPlot(object = Data1, reduction = "umap", group.by = "Type", pt.size = 0.75)
+```
+
+
+```{r}
+library(forcats)
+# select the subset as input data
+Data1.AB <- subset(x = Data1, subset = (Type == "INCCs" | 
+                                       Type == "INCCs.BCCs" | 
+                                       Type == "Nociceptive" | 
+                                       Type == "unassigned.1"| 
+                                       Type == "unassigned.2"))
+Data1.AB@meta.data$Type <- fct_drop(Data1.AB@meta.data$Type)
+```
+
+
+
+# Part II: Loading exFINDER database (and optional ligand-receptor database)
+
+*exFINDER database* is available for human, mouse, and zebrafish. *ligand-receptor database* is used for inferring functionally related signaling pathways from the exSigNet, here we use the ligand-receptor database from CellChat.
+
+```{r}
+# load exFINDER database
+load("../data/LR_layer1_mouse.rda")
+load("../data/RTF_layer2_mouse.rda")
+load("../data/TFT_layer3_mouse.rda")
+
+exFINDER.M <- list()
+exFINDER.M[[1]] <- LR_layer1_mouse
+exFINDER.M[[2]] <- RTF_layer2_mouse
+exFINDER.M[[3]] <- TFT_layer3_mouse
+```
+
+
+```{r}
+# load CellChatDB 
+# load("../data/interaction_input_CellChatDB_human.rda")
+load("../data/interaction_input_CellChatDB_mouse.rda")
+# load("../data/interaction_input_CellChatDB_zebrafish.rda")
+```
+
+
+## Prepare the inputs for exFINDER analysis
+```{r}
+exp.data <- Data1.AB@assays$RNA@data
+meta.data <- Data1.AB@meta.data
+```
+
+
+# Part III: Critical transition analysis using BioTIP
+
+Here, we followed the official workflow of BioTIP: https://bioconductor.org/packages/release/bioc/vignettes/BioTIP/inst/doc/BioTIP.html
+
+```{r}
+# load BioTIP and dependent packages
+library(BioTIP)
+library(cluster)
+library(GenomicRanges)
+library(Hmisc)
+library(MASS)
+require(stringr)
+require(psych)
+require(igraph)
+```
+
+
+```{r}
+meta <- data.frame(meta.data)
+Data <- data.frame(Data1.AB@assays$RNA@counts)
+Data <-log2(Data+1)
+
+meta$cell_barcode <- rownames(meta)
+colnames(Data) <- t(meta$cell_barcode)
+
+meta$Type <- as.character(meta$Type)
+meta$orig.ident <- as.character(meta$orig.ident)
+```
+
+
+```{r}
+meta$group = meta$Type
+
+samples <- split(meta[,"cell_barcode"],f = meta$group)
+lapply(samples, length)
+```
+
+
+```{r}
+test <- sd_selection(Data, samples, cutoff = 0.05)
+
+igraphL <- getNetwork(test, fdr = 0.05)
+cluster <- getCluster_methods(igraphL)
+
+names(cluster)
+```
+
+
+```{r}
+membersL_noweight <- getMCI(cluster, test)
+plotBar_MCI(membersL_noweight,ylim = c(0,3))
+```
+
+
+```{r}
+maxMCIms <- getMaxMCImember(membersL_noweight[[1]],membersL_noweight[[2]], minsize = 10)
+names(maxMCIms)
+
+names(maxMCIms[[1]])
+names(maxMCIms[[2]])
+```
+
+```{r}
+head(maxMCIms[['idx']])
+```
+
+
+```{r}
+biomodules = getMaxStats(membersL_noweight[['members']],maxMCIms[[1]])
+maxMCI = getMaxStats(membersL_noweight[['MCI']],maxMCIms[[1]])
+maxMCI = maxMCI[order(maxMCI,decreasing=TRUE)]
+head(maxMCI)
+
+topMCI = getTopMCI(membersL_noweight[[1]],membersL_noweight[[2]],membersL_noweight[['MCI']],min = 10)
+head(topMCI)
+```
+
+
+```{r}
+maxSD = getMaxStats(membersL_noweight[['sd']],maxMCIms[[1]])
+head(maxSD)
+```
+
+
+```{r}
+CTS = getCTS(topMCI, maxMCIms[[2]])
+```
+
+
+```{r}
+par(mar = c(10,5,0,2))
+plotMaxMCI(maxMCIms,membersL_noweight[[2]],states = names(samples),las = 2)
+```
+
+
+```{r}
+simuMCI <- simulationMCI(length(CTS),samples,Data, B=200)
+plot_MCI_Simulation(topMCI[1],simuMCI,las=2)
+```
+
+
+```{r, fig.width=2,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
+# finding Tipping Point and Evaluating CTS
+CTS_2 <- CTS$INCCs
+
+IC <- getIc(Data, samples, CTS_2, PCC_sample.target = 'average')
+par(mar = c(10,5,0,2))
+plotIc(IC,las = 2)
+```
+
+
+```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+# the IC values and CTS gene list can also be downloaded through the following links:
+# https://figshare.com/s/59107c4d31cacdf1b22b
+# https://figshare.com/s/ff99385b14f84216c893
+
+# visualizing the results using a bar plot
+data.IC <- data.frame(IC = IC, Group = names(IC))
+
+data.IC %>%
+  mutate(Group = fct_reorder(Group, IC, .desc = FALSE)) %>%
+  ggplot(aes(x=IC, y=Group,  fill=Group)) +
+    geom_bar(stat="identity", alpha=1, width=.5) +
+    xlab("Index of criticality (IC)") +
+    ylab("Cell group") +
+    theme_bw()  
+```
+
+
+
+# Part IV: find critical transition signal-related signaling network
+
+The transcription factors that regulate critical transition are denoted as critical transition signals (CTS), here we perform exFINDER analysis to infer the exSigNet that associated to the CTS.
+
+## infer the CTS-related signaling network
+```{r}
+# setup target genes
+marker.1 <- read.csv(file = "../markers/Faure2020_Mouse_marker/Faure2020_Mouse_markers_INCCs.csv")
+marker.2 <- read.csv(file = "../markers/Faure2020_Mouse_marker/Faure2020_Mouse_markers_unassigned.1.csv")
+marker.3 <- read.csv(file = "../markers/Faure2020_Mouse_marker/Faure2020_Mouse_markers_INCCs.BCCs.csv")
+
+marker.1 <- marker.1$X[1:10]
+marker.2 <- marker.2$X[1:10]
+marker.3 <- marker.3$X[1:10]
+target.123 <- c(marker.1, marker.2, marker.3)
+```
+
+
+```{r}
+# infer ltGRN
+ltGRN <- get_ltGRN(Target = target.123, DB = exFINDER.M)
+```
+
+
+```{r}
+# infer potential external signals from ltGRN
+Pex <- get_potentialex(Graph = ltGRN,
+                Exp.Data = exp.data,
+                Meta.Data = meta.data,
+                cutoff = -0.05,
+                AG.L = NULL)
+
+# head(Pex.new)
+```
+
+
+
+```{r}
+# infer exSigNet (R, TF, T are all highly expressed, L comes from the potential external signals)
+exSigNet <- get_exSigNet(Graph = ltGRN,
+                       Ligands = Pex,
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(0.05, 0.001), 
+                       AG.R = c("INCCs", "INCCs.BCCs", "unassigned.1"),
+                       AG.TF = c("INCCs", "INCCs.BCCs", "unassigned.1"))
+
+# exSigNet
+```
+
+
+```{r}
+# fix the overlap issue
+exSigNet <- fix_OverLap(exSigNet)
+```
+
+
+
+```{r}
+# check if there is any CTS included in the inferred exSigNet
+intersect(exSigNet$Graph.Node$Gene[exSigNet$Graph.Node$Role == "TF"], CTS_2)
+```
+
+
+```{r}
+# based on the exSigNet, we infer its sub-Network by select the CTS
+Path.Graph <- get_subNet(Graph = exSigNet,
+           TF = "Mitf")
+# Path.Graph
+```
+
+
+
+```{r}
+# based on this "exSigNet.new", we identify the receptors that only activated by these external signals
+Path.Graph <- filterLR_exSigNet(Graph = Path.Graph,
+                  Exp.Data = exp.data,
+                  DB = exFINDER.M)
+
+Path.Graph
+```
+
+
+
+```{r}
+Path.Graph <- get_NodeValue(Graph = Path.Graph,
+                          Exp.Data = exp.data,
+                          Meta.Data = meta.data,
+                          AG.R = c("INCCs", "INCCs.BCCs", "Nociceptive"),
+                          AG.TF = c("INCCs.BCCs", "Nociceptive"),
+                          AG.T = c("INCCs.BCCs", "Nociceptive"),
+                          Exp.ExData = NULL,
+                          Meta.ExData = NULL,
+                          AG.ExData = NULL)
+
+Path.Graph <- get_EdgeWeight(Graph = Path.Graph, 
+               Kh = 2)
+
+Path.Graph
+```
+
+
+## visualize the network
+
+```{r, fig.width=5,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
+library(igraph)
+# customize the label for coloring
+Path.Graph$Graph.Node$Role[Path.Graph$Graph.Node$Gene == "Erbb3"] = "Target (INCCs)"
+Path.Graph$Graph.Node$Role[Path.Graph$Graph.Node$Gene %in% c("Rxrg", "Mpz", "Itgb3")] = "Target (INCCs.BCCs)"
+Path.Graph$Graph.Node$Role[Path.Graph$Graph.Node$Gene %in% c("Myo5b", "Tgm2")] = "Target (unassigned.1)"
+
+actors <- data.frame(
+  name = Path.Graph$Graph.Node$Gene,
+  role = Path.Graph$Graph.Node$Role
+)
+
+relations <- data.frame(
+  from = Path.Graph$Graph.Edge$from,
+  to = Path.Graph$Graph.Edge$to
+)
+
+g <- graph_from_data_frame(
+  relations, directed = TRUE,
+  vertices = actors
+)
+
+l <- layout_with_lgl(g) 
+
+library(RColorBrewer)
+coul  <- brewer.pal(6, "Set2") 
+# Create a vector of color
+my_color <- coul[as.numeric(as.factor(V(g)$role))]
+
+plot(g, layout=l, vertex.color=my_color)
+```
+
+# Part V: infer exSigNet targeting INCCs
+
+## infer the exSigNet
+```{r}
+# target genes
+marker.1 <- read.csv(file = "../markers/Faure2020_Mouse_marker/Faure2020_Mouse_markers_INCCs.csv")
+target.1 <- marker.1$X[1:10]
+```
+
+
+```{r}
+# infer ltGRN
+ltGRN.2 <- get_ltGRN(Target = target.1, DB = exFINDER.M)
+```
+
+
+```{r}
+# infer potential external signals from ltGRN
+Pex.2 <- get_potentialex(Graph = ltGRN.2,
+                Exp.Data = exp.data,
+                Meta.Data = meta.data,
+                cutoff = -0.05,
+                AG.L = NULL)
+
+# head(Pex.new)
+```
+
+
+```{r}
+# infer exSigNet (R, TF, T are all highly expressed, L comes from the potential external signals)
+exSigNet.2 <- get_exSigNet(Graph = ltGRN.2,
+                       Ligands = Pex.2,
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(0.8, 1.5), 
+                       AG.R = c("INCCs"),
+                       AG.TF = c("INCCs"))
+
+# exSigNet.new
+```
+
+
+```{r}
+# based on this "exSigNet.new", we identify the receptors that only activated by these external signals
+exSigNet.2 <- filterLR_exSigNet(Graph = exSigNet.2,
+                  Exp.Data = exp.data,
+                  DB = exFINDER.M)
+
+exSigNet.2
+```
+
+
+```{r}
+exSigNet.2 <- get_NodeValue(Graph = exSigNet.2,
+                          Exp.Data = exp.data,
+                          Meta.Data = meta.data,
+                          AG.R = c("INCCs"),
+                          AG.TF = c("INCCs"),
+                          AG.T = c("INCCs"),
+                          Exp.ExData = NULL,
+                          Meta.ExData = NULL,
+                          AG.ExData = NULL)
+
+exSigNet.2 <- get_EdgeWeight(Graph = exSigNet.2, 
+               Kh = 2)
+
+exSigNet.2
+```
+
+
+
+## predict critical external signals and targets
+ 
+```{r}
+# compute and compare the L-R maxflow 
+df <- get_LRMaxFlow(exSigNet.2)
+df.TotalFlow <- compare_MaxFlow(df = df)
+df.TotalFlow
+```
+
+
+```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+# bar plot of the signal comparing results
+df.TotalFlow %>%
+  mutate(Gene = fct_reorder(Gene, TotalFlow* (Role=='Ligand'))) %>%
+  mutate(Gene = fct_reorder(Gene, TotalFlow* (Role=='Target'))) %>%
+  # mutate(Gene = fct_reorder(Gene, SI* (Type=='Full network'))) %>%
+  ggplot(aes(x=Gene, y=TotalFlow,  fill=Role)) +
+    geom_bar(stat="identity", alpha=1, width=.6) +
+    xlab("Gene") +
+    ylab("Total signal flow") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5))
+```
+
+
+## visualize the exSigNet
+
+Heatmap plot
+```{r}
+# calculate the ave.exp for all genes of the exSigNet.2
+exS.2_exp <- get_AveExp(Gene = exSigNet.2$Graph.Node$Gene,
+           Exp.Data = exp.data,
+           Meta.Data = meta.data)
+
+# prepare the dataframe for heatmap plot
+exS.2_exp.HP <- exS.2_exp
+exS.2_exp.HP <- exS.2_exp.HP[, -1]
+row.names(exS.2_exp.HP) <- exS.2_exp$Gene
+exS.2_exp.HP
+```
+
+
+```{r, fig.width=3.5,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+# heatmap plot
+annotation_row <- data.frame(Role = exSigNet.2$Graph.Node$Role)
+row.names(annotation_row) <- row.names(exS.2_exp.HP)
+
+pheatmap(exS.2_exp.HP,
+        cluster_row = FALSE, cluster_cols = FALSE, 
+        cellwidth = 12, cellheight = 12,
+        gaps_row = c(3, 5, 10),
+        fontsize_row = 10,
+        fontsize_col = 10,
+        annotation_row = annotation_row)
+```
+
+
+hierarchy plot
+```{r}
+# prepare for hierarchy plot
+Graph <- exSigNet.2
+
+hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
+all_leaves <- Graph$Graph.Node$Gene
+
+connect <- data.frame(from = Graph$Graph.Edge$from, to = Graph$Graph.Edge$to)
+connect$value <- Graph$Graph.Edge$Weight
+
+vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))),
+                       Expression = c(0, Graph$Graph.Node$Size)) 
+vertices$node <- c(" ", Graph$Graph.Node$Gene)
+vertices$Role <- c("NA", Graph$Graph.Node$Role)
+
+mygraph <- igraph::graph_from_data_frame( hierarchy, vertices=vertices )
+
+from <- match( connect$from, vertices$name)
+to <- match( connect$to, vertices$name)
+weight <- connect$value
+```
+
+
+```{r, fig.width=5,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
+# hierarchy plot
+ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+  geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
+  theme_void() +  
+  geom_conn_bundle(data = get_con(from = from, to = to, Strength = weight), width = 0.7, aes(colour=Strength),
+                   arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
+  scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
+  geom_node_text(aes(label = node)) +
+  scale_size_continuous( range = c(0.1,10) )
+```
+
+
+
+## evaluate the GO analysis 
+
+
+```{r}
+library(org.Mm.eg.db)
+# library(org.Dr.eg.db)
+# library(org.Hs.eg.db)
+```
+
+
+```{r}
+GO.exSigNet.2 <- get_EnrichAnalysis(Graph = exSigNet.2,
+                               OrgDb = org.Mm.eg.db,
+                               Number.of.Terms = 5,
+                               ont = "BP",
+                               pvalueCutoff = 0.05,
+                               qvalueCutoff = 0.2)
+
+GO.exSigNet.2
+```
+
+
+
+```{r, fig.width=7,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
+# visualize the results
+GO.df <- GO.exSigNet.2[[2]]
+
+GO.df.1 <- data.frame(GO.term = rownames(GO.df), variable = "Gene Prop.", value = GO.df$Node.Pct, GO.name = GO.df$GO.Name)
+GO.df.2 <- data.frame(GO.term = rownames(GO.df), variable = "Exp Prop.", value = GO.df$Exp.Pct, GO.name = GO.df$GO.Name)
+GO.df.3 <- rbind(GO.df.1, GO.df.2)
+
+ggplot(GO.df.3, aes(
+                x = factor(GO.name, levels = unique(GO.name)),            
+                y = ifelse(variable == "Gene Prop.", value, -value),  fill = variable)) +
+  geom_bar(stat = 'identity', width=0.6)+  
+  scale_fill_brewer(palette = 'Set2')+
+  coord_flip()+                                               
+  scale_y_continuous(                                         
+    labels = abs,                                             
+    expand = expansion(mult = c(0.1, 0.1))) +
+    ylab("Proportion") +
+    xlab("GO term") +
+    theme_bw()
+```
+
+
+# Part VI: infer exSigNet that activating branch B
+
+This part, we use exFINDER to investigate how the external signals activate Branch B (i.e. target the early divergent genes) through critical transcription factors. Both the early divergent genes and transcription factors are mentioned in the original paper: 
+Faure, L., Wang, Y., Kastriti, M.E. et al. Single cell RNA sequencing identifies early diversity of sensory neurons forming via bi-potential intermediates. Nat Commun 11, 4175 (2020). https://doi.org/10.1038/s41467-020-17929-4
+
+## infer the exSigNet
+
+```{r}
+# set-up target genes
+target.paper <- c("Dnase", "A330009N2", "Grasp", "Cdc42ep4", "Abracl", "Crybg3", "Slc29a1", "Msi2", "Nkain4")
+
+# infer ltGRN
+ltGRN.new <- get_ltGRN(Target = target.paper, DB = exFINDER.M)
+
+# identify potential external signals
+Pex.new <- get_potentialex(Graph = ltGRN.new,
+                Exp.Data = exp.data,
+                Meta.Data = meta.data,
+                cutoff = -0.05,
+                AG.L = NULL)
+               # AG.L = c("Nociceptive", "unassigned.1", "unassigned.2"))
+
+# infer exSigNet
+exSigNet.new <- get_exSigNet(Graph = ltGRN.new,
+                       Ligands = Pex.new,
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(0.25, 0.25), 
+                       AG.R = c("INCCs.BCCs", "INCCs", "unassigned.1"),
+                       AG.TF = c("INCCs.BCCs", "unassigned.1", "Nociceptive"))
+
+# select the TFs based on previous paper's results
+exSigNet.new2 <- get_subNet(Graph = exSigNet.new,
+           TF = c("Neurod2", "Nfib", "Hes6", "Tead1", "Foxp2", "Tfap2a", "Foxp4", "Ezh2", "Tcf4"))
+
+
+exSigNet.new2 <- filterLR_exSigNet(Graph = exSigNet.new2,
+                  Exp.Data = exp.data,
+                  DB = exFINDER.M)
+
+exSigNet.new2
+```
+
+## check the expression of receptors
+
+```{r}
+# check the receptors' expression levels in each cell group
+R.BranchB <- exSigNet.new2$Graph.Node$Gene[exSigNet.new2$Graph.Node$Role == "Receptor"]
+
+R.BranchB.df <- get_AveExp(Gene = R.BranchB,
+           Exp.Data = exp.data,
+           Meta.Data = meta.data)
+R.BranchB.df
+```
+
+```{r, fig.width=3.5,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+# visualize the results
+df <- data.frame(Exp = c(R.BranchB.df$INCCs.BCCs, R.BranchB.df$unassigned.1), Gene = c('Ifnar1', 'Rarg', 'Ifnar1', 'Rarg'), 
+                       Group = c('INCCs.BCCs', 'INCCs.BCCs', 'unassigned.1', 'unassigned.1'))
+
+df %>%
+  mutate(Pathway = fct_reorder(Gene, Group)) %>%
+  ggplot(aes(x=Exp, y=Group, fill = Gene)) +
+    geom_bar(stat="identity", alpha=1, width=.5) +
+    xlab("Average expression level") +
+    ylab("Cell group") +
+    theme_bw() 
+```
+
+
+## predict critical external signals and targets
+
+```{r}
+exSigNet.new2 <- get_NodeValue(Graph = exSigNet.new2,
+                          Exp.Data = exp.data,
+                          Meta.Data = meta.data,
+                          AG.R = c("INCCs.BCCs", "INCCs", "unassigned.1"),
+                          AG.TF = c("INCCs.BCCs", "unassigned.1", "Nociceptive"),
+                          AG.T = c("unassigned.1", "Nociceptive"),
+                          Exp.ExData = NULL,
+                          Meta.ExData = NULL,
+                          AG.ExData = NULL)
+
+exSigNet.new2 <- get_EdgeWeight(Graph = exSigNet.new2, 
+               Kh = 2)
+
+# exSigNet.new2
+```
+
+
+```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+# compute and compare the L-R maxflow 
+df <- get_LRMaxFlow(exSigNet.new2)
+df.TotalFlow <- compare_MaxFlow(df = df)
+
+# bar plot of the signal comparing results
+df.TotalFlow %>%
+  mutate(Gene = fct_reorder(Gene, TotalFlow* (Role=='Ligand'))) %>%
+  mutate(Gene = fct_reorder(Gene, TotalFlow* (Role=='Target'))) %>%
+  # mutate(Gene = fct_reorder(Gene, SI* (Type=='Full network'))) %>%
+  ggplot(aes(x=Gene, y=TotalFlow,  fill=Role)) +
+    geom_bar(stat="identity", alpha=1, width=.6) +
+    xlab("Gene") +
+    ylab("Total signal flow") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5))
+```
+
+
+## visualize the exSigNet
+
+Heatmap plot
+
+```{r, fig.width=4,fig.height = 4.5, fig.wide = TRUE, fig.align = "center"}
+# prepare the dataframe for heatmap plot
+exS.new2_exp <- get_AveExp(Gene = exSigNet.new2$Graph.Node$Gene,
+           Exp.Data = exp.data,
+           Meta.Data = meta.data)
+
+exS.new2_exp.HP <- exS.new2_exp
+exS.new2_exp.HP <- exS.new2_exp.HP[, -1]
+row.names(exS.new2_exp.HP) <- exS.new2_exp$Gene
+
+## heatmap plot
+annotation_row <- data.frame(Role = exSigNet.new2$Graph.Node$Role)
+row.names(annotation_row) <- row.names(exS.new2_exp.HP)
+
+pheatmap(exS.new2_exp.HP,
+        cluster_row = FALSE, cluster_cols = FALSE, 
+        cellwidth = 12, cellheight = 12,
+        gaps_row = c(18, 20, 22),
+        fontsize_row = 10,
+        fontsize_col = 10,
+        annotation_row = annotation_row)
+```
+
+
+
+hierarchy plot
+```{r, fig.width=6,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
+Graph <- exSigNet.new2
+
+hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
+all_leaves <- Graph$Graph.Node$Gene
+
+connect <- data.frame(from = Graph$Graph.Edge$from, to = Graph$Graph.Edge$to)
+connect$value <- Graph$Graph.Edge$Weight
+
+vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))),
+                       Expression = c(0, Graph$Graph.Node$Size)) 
+vertices$node <- c(" ", Graph$Graph.Node$Gene)
+vertices$Role <- c("NA", Graph$Graph.Node$Role)
+
+mygraph <- igraph::graph_from_data_frame( hierarchy, vertices=vertices )
+
+from <- match( connect$from, vertices$name)
+to <- match( connect$to, vertices$name)
+weight <- connect$value
+
+
+# hierarchy plot
+ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+  geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
+  theme_void() +  
+  geom_conn_bundle(data = get_con(from = from, to = to, Strength = weight), width = 0.7, aes(colour=Strength),
+                   arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
+  scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
+  geom_node_text(aes(label = node)) +
+  scale_size_continuous( range = c(0.1,10) )
+```
+
+
+
+## evaluate GO analysis results
+
+```{r}
+library(org.Mm.eg.db)
+# library(org.Dr.eg.db)
+# library(org.Hs.eg.db)
+```
+
+
+```{r}
+# GO analysis and evaluate top 5 GO terms
+GO.exSigNet.new2 <- get_EnrichAnalysis(Graph = exSigNet.new2,
+                               OrgDb = org.Mm.eg.db,
+                               Number.of.Terms = 5,
+                               ont = "BP",
+                               pvalueCutoff = 0.05,
+                               qvalueCutoff = 0.2)
+
+GO.exSigNet.new2
+```
+
+
+```{r, fig.width=7,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
+# prepare for bar plot
+GO.df <- GO.exSigNet.new2[[2]]
+GO.df.1 <- data.frame(GO.term = rownames(GO.df), variable = "Gene Prop.", value = GO.df$Node.Pct, GO.name = GO.df$GO.Name)
+GO.df.2 <- data.frame(GO.term = rownames(GO.df), variable = "Exp Prop.", value = GO.df$Exp.Pct, GO.name = GO.df$GO.Name)
+GO.df.3 <- rbind(GO.df.1, GO.df.2)
+
+ggplot(GO.df.3, aes(
+                x = factor(GO.name, levels = unique(GO.name)),             
+                y = ifelse(variable == "Gene Prop.", value, -value),  fill = variable)) +
+  geom_bar(stat = 'identity', width=0.5)+  
+  scale_fill_brewer(palette = 'Set2')+
+  coord_flip()+                                               
+  scale_y_continuous(                                         
+    labels = abs,                                             
+    expand = expansion(mult = c(0.1, 0.1))) +
+    ylab("Proportion") +
+    xlab("GO term") +
+    theme_bw()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

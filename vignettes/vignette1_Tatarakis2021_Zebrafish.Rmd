@@ -1,5 +1,5 @@
 ---
-title: "exFINDER: identify external communication signals using single-cell transcriptomics data"
+title: "exFINDER identifies differentiation-associated external signals during zebrafish neural crest (NC) development."
 author: "Changhan He"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
@@ -8,7 +8,7 @@ output:
     theme: united
 mainfont: Arial
 vignette: >
-  %\VignetteIndexEntry{exFINDER: identify external communication signals using single-cell transcriptomics data}
+  %\VignetteIndexEntry{exFINDER identifies differentiation-associated external signals during zebrafish neural crest (NC) development.}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -33,6 +33,9 @@ library(Seurat)
 library(ggplot2)
 library(patchwork)
 library(RColorBrewer)
+library(dplyr)
+library(pheatmap)
+library(ggraph)
 ```
 
 
@@ -140,7 +143,7 @@ DoHeatmap(Data1, features = Data1.marker) + NoLegend() +
   scale_fill_gradientn(colors = c("#377EB8", "white", "#E41A1C"))
 ```
 
-## Part II: Loading exFINDER database (and optional ligand-receptor database)
+# Part II: Loading exFINDER database (and optional ligand-receptor database)
 
 *exFINDER database* is available for human, mouse, and zebrafish. *ligand-receptor database* is used for inferring functionally related signaling pathways from the exSigNet, here we use the ligand-receptor database from CellChat.
 
@@ -295,8 +298,6 @@ row.names(annotation_row) <- row.names(exS_exp.HP)
 
 ```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
 # heatmap plot
-library(pheatmap)
-
 pheatmap(exS_exp.HP,
          cluster_row = FALSE, cluster_cols = FALSE, 
          cellwidth = 12, cellheight = 12,
@@ -337,7 +338,6 @@ weight <- connect$value
 
 ```{r, fig.width=8,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
 # hierarchy plot
-library(ggraph)
 
 ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
   geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
@@ -464,8 +464,6 @@ row.names(annotation_row) <- row.names(exS.2_exp.HP)
 
 ```{r, fig.width=4,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
 # heatmap plot
-library(pheatmap)
-
 pheatmap(exS.2_exp.HP,
          cluster_row = FALSE, cluster_cols = FALSE, 
          cellwidth = 12, cellheight = 12,
@@ -520,6 +518,8 @@ ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
 
 ## load CTS and set-up target genes
 ```{r}
+# the list of CTS genes can be downloaded from: https://figshare.com/s/bd69667e5b17d957a84e
+# (the corresponding IC values can be downloaded from: https://figshare.com/s/d36391b85a6ab2c95911)
 CTS.Z <- read.csv(file = "/Users/chang/Documents/exFINDER/testdata/Tatarakis2021_Zebrafish_CTS.csv")
 
 markerS <- read.csv(file = "../markers/Tatarakis2021_Zebrafish_marker/Tatarakis2021_Zebrafish_markers_skeletal.csv")

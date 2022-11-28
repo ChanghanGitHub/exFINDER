@@ -1,0 +1,513 @@
+---
+title: "exFINDER suggests critical external signals and targets during sensory neurogenesis in mouse."
+author: "Changhan He"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    theme: united
+mainfont: Arial
+vignette: >
+  %\VignetteIndexEntry{exFINDER suggests critical external signals and targets during sensory neurogenesis in mouse.}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  root.dir = './'
+)
+#knitr::opts_chunk$set(eval = FALSE)
+```
+
+
+This vignette outlines the steps of applying exFINDER to mouse single-cell transcriptomics data on: (1) identifying external signals associated to the differentiation during sensory neurogenesis in mouse; (2) inferring and analyzing the external signal-target signaling network (exSigNet); (3) critical external signals and targets; (4) clustering the signaling networks between every ligand-target pair; (5) evaluate the GO analysis outputs.
+
+## Load the required libraries
+```{r message=FALSE,warning=FALSE}
+library(exFINDER)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(RColorBrewer)
+library(dplyr)
+library(pheatmap)
+library(ggraph)
+```
+
+
+# Part I: Data input & processing & visualizing
+
+The mouse dataset (pagoda2 object) can be downloaded from: https://figshare.com/s/5356bda5f673c68cc7b3)
+and can be visualized by running the following chunck:
+```{r, fig.width=6,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
+# library(pagoda2)
+# p2w <- readRDS("/Users/chang/Documents/exFINDER/testdata/Faure2020_Mouse_GSE150150_p2w_sensory.rds")
+# p2 <- p2w$originalP2object
+# p2$plotEmbedding(type='PCA', show.legend=T, mark.clusters=T, min.group.size=1)
+```
+
+
+```{r}
+# this Seurat object is converted from the pagoda2 object 
+# and can be downloaded from: https://figshare.com/s/45e0f717eb45a874ad3a 
+Mdata <- readRDS("/Users/chang/Documents/exFINDER/testdata/Faure2020_Mouse_GSE150150_p2w_sensory_Seurat.rds") 
+Mdata = UpdateSeuratObject(object = Mdata)
+Data1 <- Mdata
+```
+
+
+```{r, fig.width=6,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
+# visualze the dataset
+DimPlot(object = Data1, reduction = "umap", group.by = "Type", pt.size = 0.75)
+```
+
+
+```{r}
+# if needed, users can discover and save marker genes of each cluster by running this chunk (optional)
+
+# Type <- levels(Data1@meta.data$Type)
+# n <- length(Type)
+# Data1@active.ident <- Data1@meta.data$Type
+# Data1.marker <- c()
+# 
+# for (i in 1:n) {
+#   cluster.markers <- FindMarkers(Data1, 
+#                                  ident.1 = Type[i] , 
+#                                  group.by = "Type", 
+#                                  only.pos = TRUE, 
+#                                  min.pct = 0.25,
+#                                  logfc.threshold = 0.25)
+#   
+#   cluster.markers %>%
+#     slice_max(order_by = -p_val)
+#   cluster.markers <- cluster.markers[1:100,]
+#   
+#   Data1.marker <- c(Data1.marker, rownames(cluster.markers[1:10, ]))
+#   
+#   write.csv(x = cluster.markers , file = paste("markers_",Type[i],".csv",sep=""))
+# }
+```
+
+
+```{r, fig.width=8,fig.height = 8, fig.wide = TRUE, fig.align = "center"}
+# if all marker genes are saved, we can directly load and visualize 
+Type <- levels(Data1@meta.data$Type)
+n <- length(Type)
+Data1@active.ident <- Data1@meta.data$Type
+Data1.marker <- c()
+
+for (i in 1:n) {
+  cluster.markers <- read.csv(file = paste("../markers/Faure2020_Mouse_marker/Faure2020_Mouse_markers_",Type[i],".csv",sep="")) 
+  
+  cluster.markers <- cluster.markers$X[1:10]
+  
+  Data1.marker <- c(Data1.marker, cluster.markers)
+}
+
+DoHeatmap(Data1, features = Data1.marker) + NoLegend() +
+  scale_fill_gradientn(colors = c("#377EB8", "white", "#E41A1C"))
+```
+
+
+# Part II: Loading exFINDER database (and optional ligand-receptor database)
+
+*exFINDER database* is available for human, mouse, and zebrafish. *ligand-receptor database* is used for inferring functionally related signaling pathways from the exSigNet, here we use the ligand-receptor database from CellChat.
+
+```{r}
+# load exFINDER database
+load("../data/LR_layer1_mouse.rda")
+load("../data/RTF_layer2_mouse.rda")
+load("../data/TFT_layer3_mouse.rda")
+
+exFINDER.M <- list()
+exFINDER.M[[1]] <- LR_layer1_mouse
+exFINDER.M[[2]] <- RTF_layer2_mouse
+exFINDER.M[[3]] <- TFT_layer3_mouse
+```
+
+
+```{r}
+# load CellChatDB 
+# load("../data/interaction_input_CellChatDB_human.rda")
+load("../data/interaction_input_CellChatDB_mouse.rda")
+# load("../data/interaction_input_CellChatDB_zebrafish.rda")
+```
+
+
+## Prepare the inputs for exFINDER analysis
+```{r}
+exp.data <- Data1@assays$RNA@data
+meta.data <- Data1@meta.data
+```
+
+
+# Part III: identifying external signals that targeting Proprio. cells
+To identify differentiation-associated external signals, we select the marker genes of Proprio. cells (one of the differentiated cell groups) as our target genes. However, the target genes *do not have to be* marker genes.
+
+## setup target genes and infer ltGRN
+```{r}
+marker <- read.csv(file = "../markers/Faure2020_Mouse_marker/Faure2020_Mouse_markers_Proprio..csv")
+target.gene <- marker$X[1:10]
+
+ltGRN <- get_ltGRN(Target = target.gene, DB = exFINDER.M)
+```
+
+## identify external signals and infer exSigNet
+```{r}
+# infer potential external signals from ltGRN
+Pex <- get_potentialex(Graph = ltGRN,
+                Exp.Data = exp.data,
+                Meta.Data = meta.data,
+                cutoff = -0.15,
+                AG.L = NULL)
+head(Pex)
+```
+
+
+```{r}
+# infer exSigNet (R, TF, T are all highly expressed, L comes from the potential external signals)
+exSigNet <- get_exSigNet(Graph = ltGRN,
+                       Ligands = Pex,
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(1, 1), 
+                       AG.R = c("Proprio.", "unassigned.3"),
+                       AG.TF = c("Proprio."))
+# exSigNet
+```
+
+
+
+```{r}
+# based on this "exSigNet", we identify the receptors that only activated by these external signals
+exSigNet <- filterLR_exSigNet(Graph = exSigNet,
+                  Exp.Data = exp.data,
+                  DB = exFINDER.M)
+exSigNet
+```
+
+
+
+```{r, fig.width=4,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
+# check the inferred external signals and their expressions via heatmap
+exS <- exSigNet$Graph.Node$Gene[exSigNet$Graph.Node$Role == "Ligand"]
+
+get_heatmap(Gene = exS,
+          Exp.Data = exp.data,
+          Meta.Data = meta.data)
+```
+
+
+
+```{r}
+# calculate the expression levels
+exSigNet <- get_NodeValue(Graph = exSigNet,
+                          Exp.Data = exp.data,
+                          Meta.Data = meta.data,
+                          AG.R = c("Proprio.", "unassigned.3"),
+                          AG.TF = c("Proprio."),
+                          AG.T = c("Proprio."),
+                          Exp.ExData = NULL,
+                          Meta.ExData = NULL,
+                          AG.ExData = NULL)
+
+# predict signaling strengths
+exSigNet <- get_EdgeWeight(Graph = exSigNet, 
+               Kh = 2)
+```
+
+
+### visualize the exSigNet via heatmap plot
+```{r}
+# prepare the dataframe for heatmap plot
+exS_exp <- get_AveExp(Gene = exSigNet$Graph.Node$Gene,
+           Exp.Data = exp.data,
+           Meta.Data = meta.data)
+
+exS_exp.HP <- exS_exp
+exS_exp.HP <- exS_exp.HP[, -1]
+row.names(exS_exp.HP) <- exS_exp$Gene
+
+## customize the row labels and col labels
+annotation_row <- data.frame(Role = exSigNet$Graph.Node$Role)
+row.names(annotation_row) <- row.names(exS_exp.HP)
+```
+
+
+
+```{r, fig.width=4,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
+# heatmap plot
+pheatmap(exS_exp.HP,
+         cluster_row = FALSE, cluster_cols = FALSE, 
+         cellwidth = 12, cellheight = 12,
+         gaps_row = c(4, 8, 17),
+         fontsize_row = 10,
+         fontsize_col = 10,
+         annotation_row = annotation_row)
+```
+
+
+### visualize the exSigNet via hierarchy plot
+
+```{r}
+# prepare for hierarchy plot
+Graph <- exSigNet
+
+hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
+all_leaves <- Graph$Graph.Node$Gene
+
+connect <- data.frame(from = Graph$Graph.Edge$from, to = Graph$Graph.Edge$to)
+connect$value <- Graph$Graph.Edge$Weight
+
+vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))),
+                       Expression = c(0, Graph$Graph.Node$Size)) 
+vertices$node <- c(" ", Graph$Graph.Node$Gene)
+vertices$Role <- c("NA", Graph$Graph.Node$Role)
+
+mygraph <- igraph::graph_from_data_frame( hierarchy, vertices=vertices )
+
+from <- match( connect$from, vertices$name)
+to <- match( connect$to, vertices$name)
+weight <- connect$value
+
+```
+
+
+```{r, fig.width=8,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
+# hierarchy plot
+ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+  geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
+  theme_void() +
+  geom_conn_bundle(data = get_con(from = from, to = to, Strength = weight), width = 1.0, aes(colour=Strength),
+                   arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
+  scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
+  geom_node_text(aes(label = node)) +
+  scale_size_continuous( range = c(0.1,10) )
+```
+
+
+
+### visualize the exSigNet via hive plot
+
+```{r}
+library(dplyr)
+library(igraph)
+# prepare for hive plot
+Graph <- exSigNet
+
+Role <- factor(x = Graph$Graph.Node$Role, levels = c("Ligand", "Receptor", "TF", "Target"))
+edges <- data.frame("from" = Graph$Graph.Edge$from, "to" = Graph$Graph.Edge$to)
+
+edges <- edges %>%
+  mutate(weight = Graph$Graph.Edge$Weight)
+
+nodes <- data.frame(name = Graph$Graph.Node$Gene, role = Role, value = Graph$Graph.Node$Size)
+g2 <- graph_from_data_frame(vertices = nodes, d = edges)
+```
+
+
+```{r, fig.width=8,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
+ggraph(g2, 'hive', axis = nodes$role) + 
+  geom_edge_hive(aes(colour = weight), width = 0.7, arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) + 
+  # geom_axis_hive(aes(colour = role), size = 0, label = FALSE) + 
+  geom_node_point(aes(size = value, color = role),  alpha = 1) +
+  geom_node_text(aes(label = name), angle = 45,  size = 6, repel = TRUE) +
+  coord_fixed() +
+  scale_edge_color_continuous(low="#80b1d3", high="#FF7F24") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.line = element_blank(),
+    axis.ticks =element_blank(),
+    axis.text =element_blank(),
+    axis.title = element_blank()
+  )  
+
+```
+
+
+# Part IV: predicting critical external signals and targets based on total signal flows 
+
+```{r}
+# compute and compare the L-R maxflow
+df <- get_LRMaxFlow(exSigNet)
+df.TotalFlow <- compare_MaxFlow(df = df)
+df.TotalFlow 
+```
+ 
+ 
+```{r, fig.width=6,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
+library(forcats)
+# bar plot of the signal comparing results
+df.TotalFlow %>%
+  mutate(Gene = fct_reorder(Gene, TotalFlow* (Role=='Ligand'))) %>%
+  mutate(Gene = fct_reorder(Gene, TotalFlow* (Role=='Target'))) %>%
+  # mutate(Gene = fct_reorder(Gene, SI* (Type=='Full network'))) %>%
+  ggplot(aes(x=Gene, y=TotalFlow,  fill=Role)) +
+    geom_bar(stat="identity", alpha=1, width=.6) +
+    xlab("Gene") +
+    ylab("Total signal flow") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5))
+
+```
+
+
+
+# Part V: clustering signaling networks between ligand-target pairs
+
+```{r}
+# calculate the matrix
+df <- get_SimilarityMatrix(Graph = exSigNet)
+```
+
+
+```{r}
+desc_stats = data.frame( Min=apply(df, 2, min),#minimum
+                          Med=apply(df, 2, median),#median
+                          Mean=apply(df, 2, mean),#mean
+                          SD=apply(df, 2, sd),#Standard deviation
+                          Max=apply(df, 2, max)#maximum
+)
+desc_stats = round(desc_stats, 1)
+```
+
+
+```{r, fig.width=6,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
+library(factoextra)
+library(cluster)
+
+res = get_clust_tendency(USArrests, 10, graph = TRUE)
+
+# scale the similarity matrix
+df = scale(df)
+df = df[, colSums(is.na(df)) != nrow(df)]
+
+res = get_clust_tendency(df, 10, graph = TRUE)
+res$plot
+```
+
+
+
+```{r, fig.width=6,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
+# plot clustering result
+library(ggfortify)
+
+km.res = kmeans(df, 4, nstart = 20)
+autoplot(km.res, data=df, label=TRUE, label.size=4, frame=FALSE) + theme_bw()
+```
+
+
+
+# Part VI: inferring functionally related signaling pathways
+
+```{r}
+# infer pathway-related network based on CellChat L-R database
+exSigNet.Path <- check_Pathway(Graph = exSigNet,
+                          LR.DB = CellChatLR.mouse,
+                          Par = 2)
+
+exSigNet.Path
+```
+
+
+```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+# compare the activation index
+AcI_Full <- get_AcI(Graph = exSigNet, Par = 2)
+AcI_Path <- exSigNet.Path[[2]]
+data.AcI <- data.frame(AcI = c(AcI_Full, AcI_Path), Pathway = c('Full network', 'SLURP (Slurp1)'))
+
+data.AcI %>%
+  mutate(Pathway = fct_reorder(Pathway, AcI)) %>%
+  ggplot(aes(x=AcI, y=Pathway)) +
+    geom_bar(stat="identity", fill="#FF7F00", alpha=1, width=.5) +
+    xlab("Activation index (AcI)") +
+    ylab("Full network vs. Pathway") +
+    theme_bw() 
+
+```
+
+
+```{r}
+# prepare for hierarchy plot 
+Graph <- exSigNet.Path[[1]]
+
+hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
+all_leaves <- Graph$Graph.Node$Gene
+
+connect <- data.frame(from = Graph$Graph.Edge$from, to = Graph$Graph.Edge$to)
+connect$value <- Graph$Graph.Edge$Weight
+
+vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))),
+                       Expression = c(0, Graph$Graph.Node$Size)) 
+vertices$node <- c(" ", Graph$Graph.Node$Gene)
+vertices$Role <- c("NA", Graph$Graph.Node$Role)
+
+mygraph <- igraph::graph_from_data_frame( hierarchy, vertices=vertices )
+
+from <- match( connect$from, vertices$name)
+to <- match( connect$to, vertices$name)
+weight <- connect$value
+```
+
+
+```{r, fig.width=8,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
+# hierarchy plot
+ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+  geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
+  theme_void() +  
+  geom_conn_bundle(data = get_con(from = from, to = to, Strength = weight), width = 0.75, aes(colour=Strength),
+                   arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
+  scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
+  geom_node_text(aes(label = node)) +
+  scale_size_continuous( range = c(0.1,10) )
+```
+
+
+
+
+# Part VII: evaluating GO analysis results
+
+```{r}
+library(org.Mm.eg.db)
+# GO analysis and evaluate top 5 GO terms
+GO.exSigNet <- get_EnrichAnalysis(Graph = exSigNet,
+                               OrgDb = org.Mm.eg.db,
+                               Number.of.Terms = 5,
+                               ont = "BP",
+                               pvalueCutoff = 0.05,
+                               qvalueCutoff = 0.2)
+
+GO.exSigNet
+```
+
+
+```{r, fig.width=7,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
+# prepare for bar plot
+GO.df <- GO.exSigNet[[2]]
+
+GO.df.1 <- data.frame(GO.term = rownames(GO.df), variable = "Gene Prop.", value = GO.df$Node.Pct, GO.name = GO.df$GO.Name)
+GO.df.2 <- data.frame(GO.term = rownames(GO.df), variable = "Exp Prop.", value = GO.df$Exp.Pct, GO.name = GO.df$GO.Name)
+GO.df.3 <- rbind(GO.df.1, GO.df.2)
+
+# bar plot
+ggplot(GO.df.3, aes(
+                x = factor(GO.name, levels = unique(GO.name)),              
+                y = ifelse(variable == "Gene Prop.", value, -value),  fill = variable)) +
+  geom_bar(stat = 'identity', width=0.6)+  
+  scale_fill_brewer(palette = 'Set2')+
+  coord_flip()+                                               
+  scale_y_continuous(                                         
+    labels = abs,                                             
+    expand = expansion(mult = c(0.1, 0.1))) +
+    ylab("Proportion") +
+    xlab("GO term") +
+    theme_bw()
+
+```
+
+
+

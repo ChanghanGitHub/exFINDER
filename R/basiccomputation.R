@@ -45,6 +45,7 @@ get_AveExp <- function(Gene,
 #'
 #' @param AveExp dataframe of averagen expression levels of genes in clusters, output of "get_AveExp"
 #' @importFrom stringr str_c
+#' @importFrom magrittr %>%
 #'
 #' @return
 #' @export
