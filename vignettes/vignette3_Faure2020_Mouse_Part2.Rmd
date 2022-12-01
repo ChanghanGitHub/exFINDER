@@ -68,7 +68,7 @@ Data1.AB@meta.data$Type <- fct_drop(Data1.AB@meta.data$Type)
 
 
 
-# Part II: Loading exFINDER database (and optional ligand-receptor database)
+# Part II: Load exFINDER database (and optional ligand-receptor database)
 
 *exFINDER database* is available for human, mouse, and zebrafish. *ligand-receptor database* is used for inferring functionally related signaling pathways from the exSigNet, here we use the ligand-receptor database from CellChat.
 
@@ -230,11 +230,11 @@ data.IC %>%
 
 
 
-# Part IV: find critical transition signal-related signaling network
+# Part IV: Find critical transition signal-related signaling network
 
 The transcription factors that regulate critical transition are denoted as critical transition signals (CTS), here we perform exFINDER analysis to infer the exSigNet that associated to the CTS.
 
-## infer the CTS-related signaling network
+## Infer the CTS-related signaling network
 ```{r}
 # setup target genes
 marker.1 <- read.csv(file = "../markers/Faure2020_Mouse_marker/Faure2020_Mouse_markers_INCCs.csv")
@@ -332,7 +332,7 @@ Path.Graph
 ```
 
 
-## visualize the network
+## Visualize the network
 
 ```{r, fig.width=5,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
 library(igraph)
@@ -368,7 +368,7 @@ plot(g, layout=l, vertex.color=my_color)
 
 # Part V: infer exSigNet targeting INCCs
 
-## infer the exSigNet
+## Infer the exSigNet
 ```{r}
 # target genes
 marker.1 <- read.csv(file = "../markers/Faure2020_Mouse_marker/Faure2020_Mouse_markers_INCCs.csv")
@@ -437,7 +437,7 @@ exSigNet.2
 
 
 
-## predict critical external signals and targets
+## Predict critical external signals and targets
  
 ```{r}
 # compute and compare the L-R maxflow 
@@ -462,7 +462,7 @@ df.TotalFlow %>%
 ```
 
 
-## visualize the exSigNet
+## Visualize the exSigNet
 
 Heatmap plot
 ```{r}
@@ -532,7 +532,7 @@ ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
 
 
 
-## evaluate the GO analysis 
+## Evaluate the GO analysis 
 
 
 ```{r}
@@ -578,12 +578,12 @@ ggplot(GO.df.3, aes(
 ```
 
 
-# Part VI: infer exSigNet that activating branch B
+# Part VI: Infer exSigNet that activating branch B
 
 This part, we use exFINDER to investigate how the external signals activate Branch B (i.e. target the early divergent genes) through critical transcription factors. Both the early divergent genes and transcription factors are mentioned in the original paper: 
 Faure, L., Wang, Y., Kastriti, M.E. et al. Single cell RNA sequencing identifies early diversity of sensory neurons forming via bi-potential intermediates. Nat Commun 11, 4175 (2020). https://doi.org/10.1038/s41467-020-17929-4
 
-## infer the exSigNet
+## Infer the exSigNet
 
 ```{r}
 # set-up target genes
@@ -621,7 +621,7 @@ exSigNet.new2 <- filterLR_exSigNet(Graph = exSigNet.new2,
 exSigNet.new2
 ```
 
-## check the expression of receptors
+## Check the expression of receptors
 
 ```{r}
 # check the receptors' expression levels in each cell group
@@ -648,7 +648,7 @@ df %>%
 ```
 
 
-## predict critical external signals and targets
+## Predict critical external signals and targets
 
 ```{r}
 exSigNet.new2 <- get_NodeValue(Graph = exSigNet.new2,
@@ -687,7 +687,7 @@ df.TotalFlow %>%
 ```
 
 
-## visualize the exSigNet
+## Visualize the exSigNet
 
 Heatmap plot
 
@@ -751,7 +751,7 @@ ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
 
 
 
-## evaluate GO analysis results
+## Evaluate GO analysis results
 
 ```{r}
 library(org.Mm.eg.db)

@@ -87,7 +87,7 @@ DimPlot(object = Data1, reduction = "umap", group.by = "Type", pt.size = 0.75)
 #   
 #   Data1.marker <- c(Data1.marker, rownames(cluster.markers[1:10, ]))
 #   
-#   write.csv(x = cluster.markers , file = paste("markers_",Type[i],".csv",sep=""))
+#   write.csv(x = cluster.markers , file = paste("../markers/Faure2020_Mouse_marker/Faure2020_Mouse_markers_",Type[i],".csv",sep=""))
 # }
 ```
 
@@ -112,7 +112,7 @@ DoHeatmap(Data1, features = Data1.marker) + NoLegend() +
 ```
 
 
-# Part II: Loading exFINDER database (and optional ligand-receptor database)
+# Part II: Load exFINDER database (and optional ligand-receptor database)
 
 *exFINDER database* is available for human, mouse, and zebrafish. *ligand-receptor database* is used for inferring functionally related signaling pathways from the exSigNet, here we use the ligand-receptor database from CellChat.
 
@@ -144,10 +144,10 @@ meta.data <- Data1@meta.data
 ```
 
 
-# Part III: identifying external signals that targeting Proprio. cells
+# Part III: Identify external signals that targeting Proprio. cells
 To identify differentiation-associated external signals, we select the marker genes of Proprio. cells (one of the differentiated cell groups) as our target genes. However, the target genes *do not have to be* marker genes.
 
-## setup target genes and infer ltGRN
+## Setup target genes and infer ltGRN
 ```{r}
 marker <- read.csv(file = "../markers/Faure2020_Mouse_marker/Faure2020_Mouse_markers_Proprio..csv")
 target.gene <- marker$X[1:10]
@@ -155,7 +155,7 @@ target.gene <- marker$X[1:10]
 ltGRN <- get_ltGRN(Target = target.gene, DB = exFINDER.M)
 ```
 
-## identify external signals and infer exSigNet
+## Identify external signals and infer exSigNet
 ```{r}
 # infer potential external signals from ltGRN
 Pex <- get_potentialex(Graph = ltGRN,
@@ -220,7 +220,7 @@ exSigNet <- get_EdgeWeight(Graph = exSigNet,
 ```
 
 
-### visualize the exSigNet via heatmap plot
+### Visualize the exSigNet via heatmap plot
 ```{r}
 # prepare the dataframe for heatmap plot
 exS_exp <- get_AveExp(Gene = exSigNet$Graph.Node$Gene,
@@ -250,7 +250,7 @@ pheatmap(exS_exp.HP,
 ```
 
 
-### visualize the exSigNet via hierarchy plot
+### Visualize the exSigNet via hierarchy plot
 
 ```{r}
 # prepare for hierarchy plot
@@ -290,7 +290,7 @@ ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
 
 
 
-### visualize the exSigNet via hive plot
+### Visualize the exSigNet via hive plot
 
 ```{r}
 library(dplyr)
@@ -329,7 +329,7 @@ ggraph(g2, 'hive', axis = nodes$role) +
 ```
 
 
-# Part IV: predicting critical external signals and targets based on total signal flows 
+# Part IV: Predict critical external signals and targets based on total signal flows 
 
 ```{r}
 # compute and compare the L-R maxflow
@@ -357,7 +357,7 @@ df.TotalFlow %>%
 
 
 
-# Part V: clustering signaling networks between ligand-target pairs
+# Part V: Clustering signaling networks between ligand-target pairs
 
 ```{r}
 # calculate the matrix
@@ -402,7 +402,7 @@ autoplot(km.res, data=df, label=TRUE, label.size=4, frame=FALSE) + theme_bw()
 
 
 
-# Part VI: inferring functionally related signaling pathways
+# Part VI: Infer functionally related signaling pathways
 
 ```{r}
 # infer pathway-related network based on CellChat L-R database
@@ -469,7 +469,7 @@ ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
 
 
 
-# Part VII: evaluating GO analysis results
+# Part VII: Evaluate GO analysis results
 
 ```{r}
 library(org.Mm.eg.db)

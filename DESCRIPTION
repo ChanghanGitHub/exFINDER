@@ -38,7 +38,10 @@ Imports:
     dplyr,
     ggplot2,
     patchwork,
-    psych
+    psych,
+    CellChat,
+    base,
+    extrafont
 Suggests: 
     knitr,
     rmarkdown

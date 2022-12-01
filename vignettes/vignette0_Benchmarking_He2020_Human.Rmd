@@ -1,0 +1,520 @@
+---
+title: "Benchmarking exFINDER using human skin data"
+author: "Changhan He"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    theme: united
+mainfont: Arial
+vignette: >
+  %\VignetteIndexEntry{Benchmarking exFINDER using human skin data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  root.dir = './'
+)
+#knitr::opts_chunk$set(eval = FALSE)
+```
+
+
+This vignette outlines the steps of benchmarking exFINDER. We use subsets of cells in a dataset to infer ligand-receptor communication from the rest cells in the dataset. Specifically, we evaluate its performance on using the published human skin scRNA-seq dataset (He, Helen, et al. Journal of Allergy and Clinical Immunology, 2020).
+
+## Load the required libraries
+```{r message=FALSE,warning=FALSE}
+library(exFINDER)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(RColorBrewer)
+library(dplyr)
+library(pheatmap)
+library(ggraph)
+
+# the following packages are for CellChat analysis
+library(CellChat)
+library(patchwork)
+library(forcats)
+library(base)
+library(extrafont)
+options(stringsAsFactors = FALSE)
+```
+
+
+## Part I: Load and process human skin dataset
+
+The processed data (Seurat object) can be downloaded from: https://figshare.com/s/e5b9f3700ee967a26523 
+
+```{r}
+# the dataset can be downloaded using the following link: 
+load(url("https://ndownloader.figshare.com/files/25950872"))
+
+# change the labels to portable format
+data_humanSkin$meta$labels <- fct_collapse(data_humanSkin$meta$labels, "APOE+FIB"="APOE+ FIB", 
+                                           "CD40LG+TC"="CD40LG+ TC",
+                                           "COL11A1+FIB"="COL11A1+ FIB",
+                                           "FBN1+FIB"="FBN1+ FIB",
+                                           "Inflam.DC"="Inflam. DC",
+                                           "Inflam.FIB"="Inflam. FIB",
+                                           "Inflam.TC"="Inflam. TC")
+
+# creat Seurat object
+Data_human <- CreateSeuratObject(data_humanSkin$data, project = "SeuratProject", assay = "RNA",
+  min.cells = 0, min.features = 0, names.field = 1,
+  names.delim = "_", meta.data = data_humanSkin$meta)
+
+# Seperate two conditions (here we only use one condition)
+Data_human <- Data_human[, Data_human@meta.data$condition %in% c("LS")]
+
+# Normalize the data
+Data_human <- NormalizeData(Data_human)
+
+# Scale the data
+all.genes <- rownames(Data_human)
+Data_human <- ScaleData(Data_human, features = all.genes)
+```
+
+
+## Part II: Discover marker genes of each cell population group
+
+We use the processed data (Seurat object) to discover marker genes of all cell groups.
+```{r}
+Data1 <- Data_human
+Data1@meta.data$Type <- as.factor(Data1@meta.data$labels)
+Data1 = UpdateSeuratObject(object = Data1)
+```
+
+All marker genes are analyzed by running the following chunck and saved in folder "../markers/He2020_Human_marker". 
+```{r}
+# Type <- levels(Data1@meta.data$Type)
+# n <- length(Type)
+# Data1.marker <- c()
+# 
+# for (i in 1:n) {
+#   cluster.markers <- FindMarkers(Data1,
+#                                  ident.1 = Type[i] ,
+#                                  group.by = "Type",
+#                                  only.pos = TRUE,
+#                                  min.pct = 0.25,
+#                                  logfc.threshold = 0.25)
+# 
+#   cluster.markers %>%
+#     slice_max(order_by = -p_val)
+#   cluster.markers <- cluster.markers[1:100,]
+# 
+#   Data1.marker <- c(Data1.marker, rownames(cluster.markers[1:10, ]))
+# 
+#   write.csv(x = cluster.markers , file = paste("../markers/He2020_Human_marker/He2020_Human_markers_",Type[i],".csv",sep=""))
+# }
+```
+
+Once all marker genes are saved, we can visualize the top10 markers of each group by running the following chunck.
+```{r, fig.width=10,fig.height = 8, fig.wide = TRUE, fig.align = "center"}
+# if all marker genes are saved, we can directly load and visualize 
+Type <- levels(Data1@meta.data$Type)
+n <- length(Type)
+Data1@active.ident <- Data1@meta.data$Type
+Data1.marker <- c()
+
+for (i in 1:n) {
+  cluster.markers <- read.csv(file = paste("../markers/He2020_Human_marker/He2020_Human_markers_",Type[i],".csv",sep="")) 
+  cluster.markers <- cluster.markers$X[1:10]
+  Data1.marker <- c(Data1.marker, cluster.markers)
+}
+
+DoHeatmap(Data1, features = Data1.marker) + NoLegend() +
+  scale_fill_gradientn(colors = c("#377EB8", "white", "#E41A1C"))
+```
+
+
+# Part III: Infer ligands using CellChat 
+
+Here, we select four cell groups from the original dataset: two subpopulations of dendritic cells (cDC2 and LC) and two subpopulations of fibroblasts cells (FBN1+ FIB and APOE+ FIB). We then perform CellChat analysis to infer cell-cell communication between these cell groups and exported the corresponding ligands in the following way:
+
+(1). CellChat analysis on the data of all four cell groups: cDC2, LC, FBN1+ FIB, and APOE+ FIB;
+(2). CellChat analysis on four datasets, each containing three of the above four cell groups.
+
+Then by comparing the inferred ligands, we can obtain the CellChat-inferred, cell group-specific ligands, for example: ligands targeting FBN1+ FIB cells but only expressed in the APOE+ FIB cells.
+
+We followed the official workflow of CellChat analysis. 
+
+## Generate CellChat objects
+
+Setup inputs (original dataset with corrected labels)
+```{r}
+data = data_humanSkin$data # normalized data matrix
+meta = data_humanSkin$meta # a dataframe with rownames containing cell mata data
+```
+
+Generate 5 CellChat objects for the analysis.
+```{r}
+# no "LC" cells
+cell.use1 = rownames(meta)[meta$condition == "LS" & meta$labels %in% c("cDC2", "FBN1+FIB", "APOE+FIB")]
+# no "cDC2" cells
+cell.use2 = rownames(meta)[meta$condition == "LS" & meta$labels %in% c("LC", "FBN1+FIB", "APOE+FIB")]
+# no "FBN1+ FIB" cells
+cell.use3 = rownames(meta)[meta$condition == "LS" & meta$labels %in% c("LC", "cDC2", "APOE+FIB")]
+# no "APOE+ FIB" cells
+cell.use4 = rownames(meta)[meta$condition == "LS" & meta$labels %in% c("LC", "cDC2", "FBN1+FIB")]
+# All four cell groups
+cell.use5 = rownames(meta)[meta$condition == "LS" & meta$labels %in% c("LC", "cDC2", "FBN1+FIB", "APOE+FIB")]
+
+barcode <- mget(paste0('cell.use', 1:5))
+All.cellchat <- list()
+
+for (i in 1:5) {
+  data.input = data[, barcode[[i]]]
+  meta.input = meta[barcode[[i]], ]
+  
+  newlabels <- fct_drop(meta.input$labels)
+  meta.input$newlabels <- newlabels
+  
+  cellchat <- createCellChat(object = data.input, meta = meta.input, group.by = "newlabels")
+  All.cellchat[[i]] <- cellchat
+  # saveRDS(cellchat, file = paste("path/cellchat",i,".rds",sep=""))
+}
+
+names(All.cellchat)<-c('cellchat1', 'cellchat2', 'cellchat3', 'cellchat4', 'cellchat5')
+```
+
+
+## CellChat analysis
+
+For detialed explaination, please check CellChat's webpage: http://www.cellchat.org/
+(or https://htmlpreview.github.io/?https://github.com/sqjin/CellChat/blob/master/tutorial/CellChat-vignette.html for full toturial )
+
+```{r, fig.align = "center"}
+CellChatDB <- CellChatDB.human # use CellChatDB.mouse if running on mouse data
+showDatabaseCategory(CellChatDB)
+```
+
+
+```{r}
+# CellChatDB.use <- subsetDB(CellChatDB, search = "Secreted Signaling") # use Secreted Signaling
+CellChatDB.use <- CellChatDB # simply use the default CellChatDB
+
+for (i in 1:5) {
+  All.cellchat[[i]]@DB <- CellChatDB.use
+}
+```
+
+
+```{r}
+for (i in 1:5) {
+  All.cellchat[[i]] <- subsetData(All.cellchat[[i]]) # This step is necessary even if using the whole database
+  future::plan("multisession", workers = 4) # do parallel
+
+  All.cellchat[[i]] <- identifyOverExpressedGenes(All.cellchat[[i]])
+  All.cellchat[[i]] <- identifyOverExpressedInteractions(All.cellchat[[i]])
+}
+```
+
+
+```{r}
+for (i in 1:5) {
+  All.cellchat[[i]] <- computeCommunProb(All.cellchat[[i]])
+  # Filter out the cell-cell communication if there are only few number of cells in certain cell groups
+  All.cellchat[[i]] <- filterCommunication(All.cellchat[[i]], min.cells = 10)
+}
+```
+
+
+```{r}
+for (i in 1:5) {
+  All.cellchat[[i]] <- computeCommunProbPathway(All.cellchat[[i]])
+  All.cellchat[[i]] <- aggregateNet(All.cellchat[[i]])
+}
+```
+
+
+visualize cell-cell communications
+```{r, fig.width=6,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
+i <- 5 #check the cell-cell communications between all four cell groups
+
+groupSize <- as.numeric(table(All.cellchat[[i]]@idents))
+par(mfrow = c(1,2), xpd=TRUE)
+
+netVisual_circle(All.cellchat[[i]]@net$count, color.use = c("blue" , "red","green", "yellow"), vertex.weight = groupSize, weight.scale = T, label.edge= F, title.name = "Number of interactions")
+
+netVisual_circle(All.cellchat[[i]]@net$weight, color.use = c("blue" , "red","green", "yellow"),vertex.weight = groupSize, weight.scale = T, label.edge= F, title.name = "Interaction weights/strength")
+```
+
+
+# Part IV: Infer the signaling network from APOE to FBN1+ FIB cells using exFINDER 
+
+From CellChat analysis we know that APOE (ligand) is only highly expressed in the APOE+ FIB cells and communicating to FBN1+ FIB cells. We then use exFINDER to infer the corresponding signaling network.
+
+## Load exFINDER database
+
+```{r}
+# load exFINDER database
+load("../data/LR_layer1_human.rda")
+load("../data/RTF_layer2_human.rda")
+load("../data/TFT_layer3_human.rda")
+
+exFINDER.H <- list()
+exFINDER.H[[1]] <- LR_layer1_human
+exFINDER.H[[2]] <- RTF_layer2_human
+exFINDER.H[[3]] <- TFT_layer3_human
+```
+
+
+```{r}
+# setup input data
+exp.data <- Data1@assays$RNA@data
+meta.data <- Data1@meta.data
+```
+
+
+## exFINDER analysis
+
+We choose the top10 marker genes of the FBN1+ FIB cells as targets.
+```{r}
+# setup input data
+marker <- read.csv(file = "../markers/He2020_Human_marker/He2020_Human_markers_FBN1+FIB.csv")
+target.gene <- marker$X[1:10]
+```
+
+The "get_ltGRN" infers ligand-target GRN based on prior knowledge (exFINDER-DB).
+```{r}
+# infer ltGRN
+ltGRN <- get_ltGRN(Target = target.gene, DB = exFINDER.H)
+```
+
+From the ltGRN, we can infer the corresponding receptors, TFs, and target genes highly expressed in the assigned cell groups, as well as the signaling network. 
+```{r}
+# infer exSigNet (R, TF, T are all highly expressed, L comes from the potential external signals)
+exSigNet <- get_exSigNet(Graph = ltGRN,
+                       Ligands = "APOE",
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(1, 1), # cutoff expression levels
+                       AG.R = c('FBN1+FIB'), # select the receptors that highly expressed in the FBN1+ FIB cells
+                       AG.TF = c('FBN1+FIB'))
+
+exSigNet
+```
+
+
+Calculate expression levels of the genes(nodes), and predict signaling strength(weight).
+```{r}
+exSigNet <- get_NodeValue(Graph = exSigNet,
+                          Exp.Data = exp.data,
+                          Meta.Data = meta.data,
+                          AG.R = c('FBN1+FIB'),
+                          AG.TF = c('FBN1+FIB'),
+                          AG.T = c('FBN1+FIB'),
+                          Exp.ExData = NULL,
+                          Meta.ExData = NULL,
+                          AG.ExData = NULL)
+exSigNet <- get_EdgeWeight(Graph = exSigNet, 
+               Kh = 2)
+```
+
+Then we can visualize their expression levels by plotting a heatmap.
+```{r}
+# prepare the dataframe for heatmap plot
+exS_exp <- get_AveExp(Gene = exSigNet$Graph.Node$Gene,
+           Exp.Data = exp.data,
+           Meta.Data = meta.data)
+
+exS_exp.HP <- exS_exp
+exS_exp.HP <- exS_exp.HP[, -1]
+row.names(exS_exp.HP) <- exS_exp$Gene
+
+exS_exp.HP <- data.frame("APOE+ FIB" = exS_exp.HP$`APOE+FIB`,
+                     "FBN1+ FIB" = exS_exp.HP$`FBN1+FIB`, 'cDC2' = exS_exp.HP$cDC2,
+                     "LC" = exS_exp.HP$LC)
+row.names(exS_exp.HP) <- exS_exp$Gene
+
+# customize the row labels and col labels
+annotation_row <- data.frame(Role = exSigNet$Graph.Node$Role)
+row.names(annotation_row) <- row.names(exS_exp.HP)
+
+head(exS_exp.HP)
+```
+
+
+
+```{r, fig.width=3,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+# heatmap plot
+pheatmap(exS_exp.HP,
+        cluster_row = FALSE, cluster_cols = FALSE, 
+        cellwidth = 12, cellheight = 12,
+        gaps_row = c(1, 3, 5),
+        fontsize_row = 10,
+        fontsize_col = 10,
+        annotation_row = annotation_row)
+```
+
+
+Besides the above external signal (APOE) that highly expressed in the APOE+ FIB cells, we can also use exFINDER to check what ligands in the ltGRN are targeting FBN1+ FIB cells and their expression levels. Here we select the first 90 ligands in the ltGRN as an example and compare their expression levels with APOE.
+
+```{r}
+# select the first 90 ligands
+ligand <- ltGRN$Graph.Node$Gene[ltGRN$Graph.Node$Role == "Ligand"][1:90]
+ligand <- intersect(ligand, row.names(exp.data))
+
+exSigNet <- get_exSigNet(Graph = ltGRN,
+                       Ligands = c(ligand, "APOE"), # compare the expression levels with APOE
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(1, 1), 
+                       AG.R = c('FBN1+FIB'),
+                       AG.TF = c('FBN1+FIB'))
+
+get_NetworkDetail(exSigNet) # show the details of exSigNet
+```
+
+
+```{r, fig.width=3,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+# check the inferred external signals and their expressions
+exS <- exSigNet$Graph.Node$Gene[exSigNet$Graph.Node$Role == "Ligand"]
+
+get_heatmap(Gene = exS,
+            Exp.Data = exp.data,
+            Meta.Data = meta.data,
+            cellwidth = 15, 
+            cellheight = 15,
+            gaps_col = NULL,
+            gaps_row = NULL,
+            fontsize_row = 10,
+            fontsize_col = 10,
+            angle_col = 0,)
+```
+
+
+# Part V: Compare the results provided from CellChat and exFINDER
+
+By comparing the CellChat analysis results of five datasets (four contain three cell groups, and one contains four cell groups), we can obtain the following information:
+
+(1). the ligands coming from any of the four cell groups talk to one cell group;
+(2). the ligands coming from a specific cell groups talk to one cell group. 
+```{r}
+cell_type <- c("LC", "cDC2", "FBN1+FIB", "APOE+FIB")
+
+CC_ligand <- list()
+
+for (k in 1:4) {
+  
+  network5 <- subsetCommunication(All.cellchat[[5]], targets.use = cell_type[k])
+  CC_L5 <- unique(network5$ligand) # all ligands targeting cell_type[k]
+  CC_ligand[[5 + 5*(k-1)]] <- CC_L5
+  
+  for (i in 1:4) {
+      # ligands from dataset i targeting cell_type[k]
+      network <- subsetCommunication(All.cellchat[[i]], targets.use = cell_type[k]) 
+      # ligands from the cells not included in dataset i targeting cell_type[k]
+      CC_L <- setdiff(CC_L5,  unique(network$ligand)) 
+      CC_ligand[[i + 5*(k-1)]] <- CC_L
+         
+  }
+  
+  CC_ligand[[k + 5*(k-1)]] <-setdiff( unique(c(CC_ligand[[1+ 5*(k-1)]], CC_ligand[[2+ 5*(k-1)]], CC_ligand[[3+ 5*(k-1)]], CC_ligand[[4+ 5*(k-1)]])), CC_ligand[[5+ 5*(k-1)]]) # ligands from cell_type[k] targeting itself
+  
+}
+
+```
+
+Firstly, for each cell group, we employ exFINDER to infer the ligand-target GRN targeting its top 10 marker genes, to obtain the corresponding ligands. 
+
+Secondly, we remove each cell group from the data (one at a time) such that they become the “external cells” for the rest cells in the data. So the inputs will only contain the remaining three cell groups. And now CellChat is unable to infer the ligands produced by the “external cells” (since they are not in the inputs). Then we use exFINDER to identify the ligands come from the “external cells” (also can be regaded as "external siganls"). 
+```{r}
+exF_ligand <- list()
+barcode <- mget(paste0('cell.use', 1:5))
+
+for (k in 1:4) {
+  # top 10 marker genes of cell_type[k]
+  marker <- read.csv(file = paste("../markers/He2020_Human_marker/He2020_Human_markers_",cell_type[k],".csv",sep=""))
+  marker_list <- marker$X[1:10]
+  
+  ltGRN <- get_ltGRN(Target = marker_list, DB = exFINDER.H)
+  # infer all ligands that highly expressed in at least one cell group
+  exS_0 <- get_potentialex(Graph = ltGRN,
+                Exp.Data = exp.data,
+                Meta.Data = meta.data,
+                cutoff = 1,
+                AG.L = c("LC", "cDC2", "FBN1+FIB", "APOE+FIB")) # ligands can come from any of the four cell groups
+  exF_ligand[[5 + 5*(k-1)]] <- exS_0
+  
+  for (i in 1:4) {
+    # select cells of dataset i
+    data.input = exp.data[, barcode[[i]]]
+    meta.input = data.frame(Type = meta.data[barcode[[i]], ]$Type)
+    meta.input$Type <- fct_drop(meta.input$Type)
+    rownames(meta.input) <- barcode[[i]]
+    
+    # infer ligands that not highly expressed in dataset i  
+    # (so they may be highly expressed by the cells outside dataset i)
+    exS_1 <- get_potentialex(Graph = ltGRN,
+                Exp.Data = data.input,
+                Meta.Data = meta.input,
+                cutoff = -1.0,
+                AG.L = NULL)
+    exF_ligand[[i + 5*(k-1)]] <- exS_1
+  }
+  
+}
+```
+
+By comparing the results, we can calculate the recovery rate -- the proportion of the CellChat-inferred ligands that captured by exFINDER.
+```{r}
+coverR <- c()
+
+for (j in 1:length(exF_ligand)) {
+  # if CellChat does not find such ligands, then we set "cover rate"=NULL
+  if ( length(CC_ligand[[j]])==0 ){
+    coverR[j] <- "NULL"
+  } else{
+    coverR[j] <- 1- length(setdiff(CC_ligand[[j]], exF_ligand[[j]]))/length(CC_ligand[[j]])
+  }
+}
+
+
+```
+
+
+
+```{r}
+coverR[coverR == "NULL"] <- NaN
+coverR <- as.numeric(coverR)
+
+df <- data.frame("LC" = coverR[1:5], "cDC2" = coverR[6:10], 
+                  "FBN1+ FIB" = coverR[11:15], "APOE+ FIB" = coverR[16:20])
+rownames(df) <- c("LC-specific", "cDC2-specific", "FBN1+ FIB-specific", "APOE+ FIB-specific", "All cell groups")
+df
+```
+
+
+
+```{r, fig.width=5,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
+pheatmap(t(df),
+         cluster_row = FALSE, cluster_cols = FALSE, 
+         cellwidth = 40, cellheight = 40,
+         fontsize_row = 12,
+         fontsize_col = 10,
+         angle_col = 45)
+```
+
+
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+
+
+
+
+
+
