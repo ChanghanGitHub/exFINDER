@@ -372,7 +372,7 @@ get_NetworkDetail(exSigNet) # show the details of exSigNet
 ```
 
 
-```{r, fig.width=3,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+```{r, fig.width=4,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
 # check the inferred external signals and their expressions
 exS <- exSigNet$Graph.Node$Gene[exSigNet$Graph.Node$Role == "Ligand"]
 

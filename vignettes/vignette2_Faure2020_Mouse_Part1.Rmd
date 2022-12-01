@@ -92,7 +92,7 @@ DimPlot(object = Data1, reduction = "umap", group.by = "Type", pt.size = 0.75)
 ```
 
 
-```{r, fig.width=8,fig.height = 8, fig.wide = TRUE, fig.align = "center"}
+```{r, fig.width=9,fig.height = 8, fig.wide = TRUE, fig.align = "center"}
 # if all marker genes are saved, we can directly load and visualize 
 Type <- levels(Data1@meta.data$Type)
 n <- length(Type)
@@ -392,7 +392,7 @@ res$plot
 
 
 
-```{r, fig.width=6,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
+```{r, fig.width=7,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
 # plot clustering result
 library(ggfortify)
 

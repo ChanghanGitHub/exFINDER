@@ -619,6 +619,9 @@ plot(g, layout=l, vertex.color=my_color)
 ```
 
 
+```{r}
+sessionInfo()
+```
 
 
 

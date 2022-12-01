@@ -148,7 +148,7 @@ names(cluster)
 ```
 
 
-```{r}
+```{r, fig.align = "center"}
 membersL_noweight <- getMCI(cluster, test)
 plotBar_MCI(membersL_noweight,ylim = c(0,3))
 ```
@@ -189,19 +189,19 @@ CTS = getCTS(topMCI, maxMCIms[[2]])
 ```
 
 
-```{r}
+```{r, fig.align = "center"}
 par(mar = c(10,5,0,2))
 plotMaxMCI(maxMCIms,membersL_noweight[[2]],states = names(samples),las = 2)
 ```
 
 
-```{r}
+```{r, fig.align = "center"}
 simuMCI <- simulationMCI(length(CTS),samples,Data, B=200)
 plot_MCI_Simulation(topMCI[1],simuMCI,las=2)
 ```
 
 
-```{r, fig.width=2,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
+```{r, fig.align = "center"}
 # finding Tipping Point and Evaluating CTS
 CTS_2 <- CTS$INCCs
 
@@ -211,7 +211,7 @@ plotIc(IC,las = 2)
 ```
 
 
-```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+```{r, fig.width=5,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
 # the IC values and CTS gene list can also be downloaded through the following links:
 # https://figshare.com/s/59107c4d31cacdf1b22b
 # https://figshare.com/s/ff99385b14f84216c893
@@ -479,7 +479,7 @@ exS.2_exp.HP
 ```
 
 
-```{r, fig.width=3.5,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+```{r, fig.width=4,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
 # heatmap plot
 annotation_row <- data.frame(Role = exSigNet.2$Graph.Node$Role)
 row.names(annotation_row) <- row.names(exS.2_exp.HP)
@@ -633,7 +633,7 @@ R.BranchB.df <- get_AveExp(Gene = R.BranchB,
 R.BranchB.df
 ```
 
-```{r, fig.width=3.5,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+```{r, fig.width=5,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
 # visualize the results
 df <- data.frame(Exp = c(R.BranchB.df$INCCs.BCCs, R.BranchB.df$unassigned.1), Gene = c('Ifnar1', 'Rarg', 'Ifnar1', 'Rarg'), 
                        Group = c('INCCs.BCCs', 'INCCs.BCCs', 'unassigned.1', 'unassigned.1'))
@@ -668,7 +668,7 @@ exSigNet.new2 <- get_EdgeWeight(Graph = exSigNet.new2,
 ```
 
 
-```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
+```{r, fig.width=5.5,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
 # compute and compare the L-R maxflow 
 df <- get_LRMaxFlow(exSigNet.new2)
 df.TotalFlow <- compare_MaxFlow(df = df)
@@ -691,7 +691,7 @@ df.TotalFlow %>%
 
 Heatmap plot
 
-```{r, fig.width=4,fig.height = 4.5, fig.wide = TRUE, fig.align = "center"}
+```{r, fig.width=4,fig.height = 6.5, fig.wide = TRUE, fig.align = "center"}
 # prepare the dataframe for heatmap plot
 exS.new2_exp <- get_AveExp(Gene = exSigNet.new2$Graph.Node$Gene,
            Exp.Data = exp.data,
@@ -717,7 +717,7 @@ pheatmap(exS.new2_exp.HP,
 
 
 hierarchy plot
-```{r, fig.width=6,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
+```{r, fig.width=6.5,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
 Graph <- exSigNet.new2
 
 hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
