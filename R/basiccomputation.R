@@ -88,3 +88,59 @@ get_RowMax <- function(AveExp){
 
   return(output.2)
 }
+
+#' calculate the precentiel values of the cell groups in a dataset
+#'
+#' @param Exp.Data expression matrix (rows: features, columns: cells)
+#' @param Meta.Data meta data of the expression matrix, must have a variable "Type" containing all cell labels
+#' @param percentile a vector of probabilities (default is c(.5, .75, .90))
+#'
+#' @return
+#' @export
+#'
+#' @examples
+get_percentile <- function(Exp.Data,
+                           Meta.Data,
+                           percentile){
+  Exp.allGene <- get_AveExp(Gene = row.names(Exp.Data),
+                            Exp.Data = Exp.Data,
+                            Meta.Data = Meta.Data)
+  N <- length(levels(Meta.Data$Type))
+
+  if(length(percentile) == 0){
+    percentile <- c(.5, .75, .90)
+  }
+
+  Np <- length(percentile)
+
+  for (i in 1:N) {
+
+    if(i==1){
+      data <- data.frame(exp = Exp.allGene[, 1+i][which(Exp.allGene[, 1+i] > 0)])
+      quantile <- quantile(data$exp, probs = percentile)
+      quantile_1<-data.frame(t(matrix(quantile)))
+      colnames(quantile_1)<-names(quantile)
+    }else{
+      data <- data.frame(exp = Exp.allGene[, 1+i][which(Exp.allGene[, 1+i] > 0)])
+      quantile <- quantile(data$exp, probs = percentile)
+      quantile_2<-data.frame(t(matrix(quantile)))
+      colnames(quantile_2)<-names(quantile)
+
+      quantile_1 <- rbind(quantile_1, quantile_2)
+    }
+  }
+  row.names(quantile_1) <- levels(Meta.Data$Type)
+
+  for (j in 1:Np) {
+    if (j == 1){
+      data1 <- data.frame(Type = row.names(quantile_1), Ave.Exp. = quantile_1[, j], Prob. = percentile[j])
+    }else{
+      data2 <- data.frame(Type = row.names(quantile_1), Ave.Exp. = quantile_1[, j], Prob. = percentile[j])
+      data1 <- rbind(data1, data2)
+    }
+  }
+
+  data1$Prob. <- as.factor(data1$Prob.)
+
+  return(data1)
+}

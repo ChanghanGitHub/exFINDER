@@ -180,6 +180,20 @@ meta.Exdata <- Data1@meta.data
 ```
 
 
+calculate the percentile values of cell groups for determining the cutoff thresholds for "barely expressed genes" and "highly expressed genes" in later analysis
+```{r}
+data4 <- get_percentile(Exp.Data = exp.Exdata,
+               Meta.Data = meta.Exdata,
+               percentile = c(.5, .75, .90))
+
+ggplot(data=data4, aes(x=Type, y=Ave.Exp., color=Prob.)) +
+  geom_point(size=3) +
+  theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5))
+```
+
+
+
 # Part III: Identify external signals that come from NON-NC cells targeting skeletal cells
 
 To identify differentiation-associated external signals, we select the marker genes of skeletal cells (one of the differentiated cell groups) as our target genes. However, the target genes *do not have to be* marker genes.
@@ -194,27 +208,27 @@ ltGRN <- get_ltGRN(Target = target.gene, DB = exFINDER.Z)
 
 ## Identify external signals and infer exSigNet
 
-Based on the ltGRN, we can infer the ligands (potantial external signals) that are barely expressed (expression level lower than 0.15) in the NC cells.
+Based on the ltGRN, we can infer the ligands (potantial external signals) that are low expressed (expression level lower than 0.075) in the NC cells.
 ```{r}
 # infer potential external signals from ltGRN
 # may be highly expressed in the non-NC cells or external environment
 Pex <- get_potentialex(Graph = ltGRN,
                 Exp.Data = exp.data,
                 Meta.Data = meta.data,
-                cutoff = -0.15,
+                cutoff = -0.072,
                 AG.L = NULL)
 head(Pex)
 ```
 
 
-Next, we can infer the corresponding receptors, TFs, and target genes highly expressed in the assigned cell groups, as well as the signaling network.
+Next, we can infer the corresponding receptors, TFs, and target genes high expressed in the assigned cell groups, as well as the signaling network.
 ```{r}
 # infer exSigNet (R, TF, T are all highly expressed, L comes from the potential external signals)
 exSigNet <- get_exSigNet(Graph = ltGRN,
                        Ligands = Pex, # the ligands must be potential external signals
                        Exp.Data = exp.data,
                        Meta.Data = meta.data,
-                       par.cutoff = c(2, 2), 
+                       par.cutoff = c(0.6, 0.6), 
                        # we select the receptors that are highly expressed in the transition and skeletal cells 
                        # (around bifurcation point)
                        AG.R = c("skeletal", "transition"),  
@@ -243,7 +257,7 @@ Since we also have the single-cell data of non-NC cells, we can regard them as "
 exSigNet <- get_exSigNetExData(Graph = exSigNet,
                                  Exp.ExData = exp.Exdata,
                                  Meta.ExData = meta.Exdata,
-                                 cutoff.ExData = 0.5,
+                                 cutoff.ExData = 0.6,
                                  # find the external signals that are highly expressed in the non-NC cells
                                  AG.ExData = c('Endothelium','Epithelium','Heart_primordium','NT'))
 exSigNet
@@ -288,11 +302,6 @@ exS_exp.HP <- data.frame("Endothelium" = exS_exp.HP$Endothelium,
                      "pigment" = exS_exp.HP$pigment, "skeletal" = exS_exp.HP$skeletal)
 row.names(exS_exp.HP) <- exS_exp$Gene
 
-exS_exp.HP
-```
-
-
-```{r}
 # customize the row labels and col labels
 annotation_col = data.frame(
   CellType = c("non-NC cell", "non-NC cell", "non-NC cell", "non-NC cell", "NC cell", "NC cell", "NC cell", "NC cell", "NC cell"))
@@ -306,56 +315,45 @@ row.names(annotation_row) <- row.names(exS_exp.HP)
 
 ```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
 # heatmap plot
-pheatmap(exS_exp.HP,
+bk <- c(seq(0,1.99,by=0.01), seq(2,4.5,by=0.01))
+
+p <- pheatmap(exS_exp.HP,
          cluster_row = FALSE, cluster_cols = FALSE, 
          cellwidth = 12, cellheight = 12,
-         gaps_row = c(2, 4, 5),
+         gaps_row = c(1, 2, 6),
          fontsize_row = 10,
          fontsize_col = 10,
          annotation_row = annotation_row,
-         annotation_col = annotation_col)
+         annotation_col = annotation_col,
+         color = colorRampPalette(rev(brewer.pal(n = 7, name =
+  "RdYlBu")))(length(bk)),
+         breaks=bk)
+
+p
+# ggsave(p, filename="Fig_3d.pdf")
 ```
 
 
 
 ### Visualize the exSigNet via hierarchy plot
-
-```{r}
-# prepare for hierarchy plot
-Graph <- exSigNet
-
-hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
-all_leaves <- Graph$Graph.Node$Gene
-
-connect <- data.frame(from = Graph$Graph.Edge$from, to = Graph$Graph.Edge$to)
-connect$value <- Graph$Graph.Edge$Weight
-
-vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))),
-                       Expression = c(0, Graph$Graph.Node$Size)) 
-vertices$node <- c(" ", Graph$Graph.Node$Gene)
-vertices$Role <- c("NA", Graph$Graph.Node$Role)
-
-mygraph <- igraph::graph_from_data_frame( hierarchy, vertices=vertices )
-
-from <- match( connect$from, vertices$name)
-to <- match( connect$to, vertices$name)
-weight <- connect$value
-
-```
-
-
 ```{r, fig.width=8,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
 # hierarchy plot
+exSigNet_plot <- get_readyforplot(Graph = exSigNet)
 
-ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+p <- ggraph(exSigNet_plot[[1]], layout = 'dendrogram', circular = TRUE) + 
   geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
   theme_void() +
-  geom_conn_bundle(data = get_con(from = from, to = to, Strength = weight), width = 1.0, aes(colour=Strength), 
+  geom_conn_bundle(data = get_con(from = exSigNet_plot[[2]]$from, 
+                                  to = exSigNet_plot[[2]]$to, 
+                                  Strength = exSigNet_plot[[2]]$weight), width = 1.0, aes(colour=Strength), 
                    arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
   scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
   geom_node_text(aes(label = node)) +
   scale_size_continuous( range = c(0.1,10) )
 
+p
+
+# ggsave(p, filename="Fig_3f.pdf")
 ```
 
 
@@ -365,7 +363,7 @@ Here, *come from external environment* means very low (or zero) expressions in a
 ## Setup target genes and infer ltGRN
 ```{r}
 marker <- read.csv(file = "../markers/Tatarakis2021_Zebrafish_marker/Tatarakis2021_Zebrafish_markers_skeletal.csv")
-target.gene2 <- marker$X[11:20]
+target.gene2 <- marker$X[1:10]
 
 ltGRN.2 <- get_ltGRN(Target = target.gene2, DB = exFINDER.Z)
 ```
@@ -377,7 +375,7 @@ ltGRN.2 <- get_ltGRN(Target = target.gene2, DB = exFINDER.Z)
 Pex.2 <- get_potentialex(Graph = ltGRN.2,
                 Exp.Data = exp.Exdata,
                 Meta.Data = meta.Exdata,
-                cutoff = -0.15,
+                cutoff = -0.072,
                 AG.L = NULL)
 head(Pex.2)
 ```
@@ -385,12 +383,12 @@ head(Pex.2)
 
 
 ```{r}
-# infer exSigNet.2 (R, TF, T are all highly expressed, L comes from the potential external signals)
+# infer exSigNet.2 (R, TF, T are all high expressed, L comes from the potential external signals)
 exSigNet.2 <- get_exSigNet(Graph = ltGRN.2,
                        Ligands = Pex.2,
                        Exp.Data = exp.data,
                        Meta.Data = meta.data,
-                       par.cutoff = c(1, 1), 
+                       par.cutoff = c(0.6, 0.6), 
                        AG.R = c("skeletal", "transition"),
                        AG.TF = c('skeletal'))
 # exSigNet.2
@@ -473,53 +471,41 @@ row.names(annotation_row) <- row.names(exS.2_exp.HP)
 
 ```{r, fig.width=4,fig.height = 5, fig.wide = TRUE, fig.align = "center"}
 # heatmap plot
-pheatmap(exS.2_exp.HP,
+bk <- c(seq(0,1.99,by=0.01), seq(2,4.5,by=0.01))
+
+p <- pheatmap(exS.2_exp.HP,
          cluster_row = FALSE, cluster_cols = FALSE, 
          cellwidth = 12, cellheight = 12,
-         gaps_row = c(4, 6, 11),
+         gaps_row = c(1, 2, 11),
          fontsize_row = 10,
          fontsize_col = 10,
          annotation_row = annotation_row,
-         annotation_col = annotation_col)
+         annotation_col = annotation_col,
+         color = colorRampPalette(rev(brewer.pal(n = 7, name =
+  "RdYlBu")))(length(bk)),
+         breaks=bk)
+p
+# ggsave(p, filename="Fig_3e_revision.pdf")
 ```
 
 
 ### Visualize the exSigNet via hierarchy plot
-
-```{r, fig.width=4,fig.height = 3, fig.wide = TRUE, fig.align = "center"}
-# prepare for hierarchy plot
-Graph <- exSigNet.2
-
-hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
-all_leaves <- Graph$Graph.Node$Gene
-
-connect <- data.frame(from = Graph$Graph.Edge$from, to = Graph$Graph.Edge$to)
-connect$value <- Graph$Graph.Edge$Weight
-
-vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))),
-                       Expression = c(0, Graph$Graph.Node$Size)) 
-vertices$node <- c(" ", Graph$Graph.Node$Gene)
-vertices$Role <- c("NA", Graph$Graph.Node$Role)
-
-mygraph <- igraph::graph_from_data_frame( hierarchy, vertices=vertices )
-
-from <- match( connect$from, vertices$name)
-to <- match( connect$to, vertices$name)
-weight <- connect$value
-
-```
-
-
 ```{r, fig.width=8,fig.height = 7, fig.wide = TRUE, fig.align = "center"}
 # hierarchy plot
-ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+exSigNet_plot <- get_readyforplot(Graph = exSigNet)
+
+p <- ggraph(exSigNet_plot[[1]], layout = 'dendrogram', circular = TRUE) + 
   geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
   theme_void() +
-  geom_conn_bundle(data = get_con(from = from, to = to, Strength = weight), width = 0.7, aes(colour=Strength),
+  geom_conn_bundle(data = get_con(from = exSigNet_plot[[2]]$from, 
+                                  to = exSigNet_plot[[2]]$to, 
+                                  Strength = exSigNet_plot[[2]]$weight), width = 0.7, aes(colour=Strength),
                    arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
   scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
   geom_node_text(aes(label = node)) +
   scale_size_continuous( range = c(0.1,10) )
+p
+# ggsave(p, filename="Fig_3g.pdf")
 ```
 
 # Part IV: Infer the critical transition signal-related exSigNet
@@ -556,6 +542,7 @@ Pex.3 <- get_potentialex(Graph = ltGRN.3,
                 AG.L = NULL)
 
 # infer exSigNet (R, TF, T are all highly expressed, L comes from the potential external signals)
+# here, we are interested in the existance of the exSigNet that associated to the CTS, so we set the cutoff values to be relatively low 
 exSigNet.3 <- get_exSigNet(Graph = ltGRN.3,
                        Ligands = Pex.3,
                        Exp.Data = exp.data,

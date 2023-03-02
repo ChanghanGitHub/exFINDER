@@ -1,0 +1,426 @@
+---
+title: "EMT_exFINDER"
+author: "Changhan"
+date: "2023-02-14"
+output: html_document
+---
+
+## Load required packages
+```{r}
+library(Seurat)
+library(cowplot)
+library(ggplot2)
+library(dplyr)
+library(viridis)
+library(ggforce)
+library(pheatmap)
+library(fgsea)
+library(ggsci)
+library(RColorBrewer)
+library(forcats)
+```
+
+
+
+## Load data sets
+The datasets can be downloaded from: https://doi.org/10.1038/s41467-020-16066-2
+```{r}
+# Data1: a549
+Data11 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/A549/A549_TGFB1.rds")
+Data12 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/A549/A549_EGF.rds")
+Data13 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/A549/A549_TNF.rds")
+
+# Data2: du145
+Data21 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/DU145/DU145_TGFB1.rds")
+Data22 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/DU145/DU145_EGF.rds")
+Data23 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/DU145/DU145_TNF.rds")
+
+# Data3: mcf7
+Data31 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/MCF7/MCF7_TGFB1.rds")
+Data32 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/MCF7/MCF7_EGF.rds")
+Data33 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/MCF7/MCF7_TNF.rds")
+
+# Data4: ovca420
+Data41 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/OVCA420/OVCA420_TGFB1.rds")
+Data42 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/OVCA420/OVCA420_EGF.rds")
+Data43 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/OVCA420/OVCA420_TNF.rds")
+```
+
+
+## regulons (targets)
+```{r}
+regulons <- c("IRF7", "MYC", "RELB", "ATF4", "SOX4", "KLF6", "JUNB", "JUN", "ETS2", "SOX9", "BHLHE40", "EGR1", "FOSB",
+              "FOS", "ELF3", "SPDEF", "MYBL2", "E2F1", "CEBPD", "TFAP2C", "CEBPB", "FOSL1")
+inducers <- c("TGFB1", "EGF", "TNF")
+datasets <- c("A549", "DU145", "MCF7", "OVCA420")
+```
+
+
+################################################################################
+
+# TGFB1: "ITGB1"
+# EGF: "M6PR"
+# TNF: "CALM1", "TNFRSF1A"
+```{r}
+receptors <- c("ITGB1", "M6PR", "CALM1", "TNFRSF1A")
+```
+
+
+```{r}
+Data.input <- list()
+Meta.input <- list()
+
+UpdateSeuratObject(object = Data11)
+Data.input[[1]] <- Data11@assays$RNA@data
+Meta.input[[1]] <- Data11@meta.data
+
+UpdateSeuratObject(object = Data12)
+Data.input[[2]] <- Data12@assays$RNA@data
+Meta.input[[2]] <- Data12@meta.data
+
+UpdateSeuratObject(object = Data13)
+Data.input[[3]] <- Data13@assays$RNA@data
+Meta.input[[3]] <- Data13@meta.data
+
+UpdateSeuratObject(object = Data21)
+Data.input[[4]] <- Data21@assays$RNA@data
+Meta.input[[4]] <- Data21@meta.data
+
+UpdateSeuratObject(object = Data22)
+Data.input[[5]] <- Data22@assays$RNA@data
+Meta.input[[5]] <- Data22@meta.data
+
+UpdateSeuratObject(object = Data23)
+Data.input[[6]] <- Data23@assays$RNA@data
+Meta.input[[6]] <- Data23@meta.data
+
+UpdateSeuratObject(object = Data31)
+Data.input[[7]] <- Data31@assays$RNA@data
+Meta.input[[7]] <- Data31@meta.data
+
+UpdateSeuratObject(object = Data32)
+Data.input[[8]] <- Data32@assays$RNA@data
+Meta.input[[8]] <- Data32@meta.data
+
+UpdateSeuratObject(object = Data33)
+Data.input[[9]] <- Data33@assays$RNA@data
+Meta.input[[9]] <- Data33@meta.data
+
+UpdateSeuratObject(object = Data41)
+Data.input[[10]] <- Data41@assays$RNA@data
+Meta.input[[10]] <- Data41@meta.data
+
+UpdateSeuratObject(object = Data42)
+Data.input[[11]] <- Data42@assays$RNA@data
+Meta.input[[11]] <- Data42@meta.data
+
+UpdateSeuratObject(object = Data43)
+Data.input[[12]] <- Data43@assays$RNA@data
+Meta.input[[12]] <- Data43@meta.data
+```
+
+
+```{r}
+for (i in 1:12) {
+  Meta.input[[i]]$Time2 <- as.factor(Meta.input[[i]]$Time)
+  Meta.input[[i]]$Time2 <- fct_collapse(Meta.input[[i]]$Time2, 
+                                     "Before"="0d",
+                                     "On"=c("8h", "1d", "3d", "7d"),
+                                     "Off"=c("8h_rm", "1d_rm", "3d_rm"))
+  Meta.input[[i]]$Time2 <- fct_drop(Meta.input[[i]]$Time2)
+}
+```
+
+
+
+
+```{r}
+library(ggplot2) 
+
+R_exp_Total <- list()
+
+for (i in 1:3) {
+  R_exp <- data.frame(Data.input[[i]][row.names(Data.input[[i]]) %in% receptors, ])
+  R_exp <- data.frame(t(R_exp))
+  
+  if (i == 1){
+    R_exp_Total[[1]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$ITGB1)
+  }else if (i == 2){
+    R_exp_Total[[2]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$M6PR)
+  }else {
+    R_exp_Total[[3]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$CALM1)
+    R_exp_Total[[4]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$TNFRSF1A)
+  }
+
+}
+
+for (i in 1:4) {
+  R_exp_Total[[i]]$Exp <- scale(R_exp_Total[[i]]$Exp)
+}
+
+
+p1 <- ggplot(R_exp_Total[[1]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[1]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="ITGB1",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+  
+
+p2 <- ggplot(R_exp_Total[[2]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[2]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="M6PR",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p3 <- ggplot(R_exp_Total[[3]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[3]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="CALM1",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p4 <- ggplot(R_exp_Total[[4]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[4]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun="mean", geom='point', shape=20, size = 3) +
+  labs(title="TNFRSF1A",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p <- p1+p2+p3+p4
+p
+ggsave(p, filename=paste(datasets[1], "_BoxPlot_Receptors", ".pdf",sep=""))
+```
+
+
+```{r}
+library(ggplot2) 
+
+R_exp_Total <- list()
+
+for (i in 4:6) {
+  R_exp <- data.frame(Data.input[[i]][row.names(Data.input[[i]]) %in% receptors, ])
+  R_exp <- data.frame(t(R_exp))
+  
+  if (i == 4){
+    R_exp_Total[[1]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$ITGB1)
+  }else if (i == 5){
+    R_exp_Total[[2]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$M6PR)
+  }else {
+    R_exp_Total[[3]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$CALM1)
+    R_exp_Total[[4]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$TNFRSF1A)
+  }
+
+}
+
+for (i in 1:4) {
+  R_exp_Total[[i]]$Exp <- scale(R_exp_Total[[i]]$Exp)
+}
+
+
+p1 <- ggplot(R_exp_Total[[1]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[1]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="ITGB1",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+  
+
+p2 <- ggplot(R_exp_Total[[2]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[2]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="M6PR",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p3 <- ggplot(R_exp_Total[[3]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[3]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="CALM1",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p4 <- ggplot(R_exp_Total[[4]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[4]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun="mean", geom='point', shape=20, size = 3) +
+  labs(title="TNFRSF1A",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p <- p1+p2+p3+p4
+p
+ggsave(p, filename=paste(datasets[2], "_BoxPlot_Receptors", ".pdf",sep=""))
+```
+
+
+```{r}
+library(ggplot2) 
+
+R_exp_Total <- list()
+
+for (i in 7:9) {
+  R_exp <- data.frame(Data.input[[i]][row.names(Data.input[[i]]) %in% receptors, ])
+  R_exp <- data.frame(t(R_exp))
+  
+  if (i == 7){
+    R_exp_Total[[1]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$ITGB1)
+  }else if (i == 8){
+    R_exp_Total[[2]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$M6PR)
+  }else {
+    R_exp_Total[[3]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$CALM1)
+    R_exp_Total[[4]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$TNFRSF1A)
+  }
+
+}
+
+for (i in 1:4) {
+  R_exp_Total[[i]]$Exp <- scale(R_exp_Total[[i]]$Exp)
+}
+
+p1 <- ggplot(R_exp_Total[[1]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[1]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="ITGB1",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+  
+
+p2 <- ggplot(R_exp_Total[[2]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[2]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="M6PR",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p3 <- ggplot(R_exp_Total[[3]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[3]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="CALM1",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p4 <- ggplot(R_exp_Total[[4]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[4]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun="mean", geom='point', shape=20, size = 3) +
+  labs(title="TNFRSF1A",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p <- p1+p2+p3+p4
+p
+ggsave(p, filename=paste(datasets[3], "_BoxPlot_Receptors", ".pdf",sep=""))
+```
+
+
+```{r}
+library(ggplot2) 
+
+R_exp_Total <- list()
+
+for (i in 10:12) {
+  R_exp <- data.frame(Data.input[[i]][row.names(Data.input[[i]]) %in% receptors, ])
+  R_exp <- data.frame(t(R_exp))
+  
+  if (i == 10){
+    R_exp_Total[[1]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$ITGB1)
+  }else if (i == 11){
+    R_exp_Total[[2]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$M6PR)
+  }else {
+    R_exp_Total[[3]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$CALM1)
+    R_exp_Total[[4]] <- data.frame(Cell = row.names(R_exp), Type = as.factor(Meta.input[[i]]$Time2), Exp = R_exp$TNFRSF1A)
+  }
+
+}
+
+for (i in 1:4) {
+  R_exp_Total[[i]]$Exp <- scale(R_exp_Total[[i]]$Exp)
+}
+
+p1 <- ggplot(R_exp_Total[[1]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[1]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="ITGB1",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+  
+
+p2 <- ggplot(R_exp_Total[[2]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[2]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="M6PR",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p3 <- ggplot(R_exp_Total[[3]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[3]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun=mean, geom='point', shape=20, size = 3) +
+  labs(title="CALM1",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p4 <- ggplot(R_exp_Total[[4]], aes(x = Type, y = Exp, fill=Type)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette="Accent") +
+  coord_cartesian(ylim = quantile(R_exp_Total[[4]]$Exp, c(0.1, 0.9))) +
+  stat_summary(fun="mean", geom='point', shape=20, size = 3) +
+  labs(title="TNFRSF1A",
+        y ="Expression (scaled)", x = "Cell group") +
+  theme_classic()+ theme(legend.position = "none")
+
+p <- p1+p2+p3+p4
+p
+ggsave(p, filename=paste(datasets[4], "_BoxPlot_Receptors", ".pdf",sep=""))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

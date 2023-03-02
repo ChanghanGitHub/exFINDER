@@ -112,6 +112,7 @@ DoHeatmap(Data1, features = Data1.marker) + NoLegend() +
 ```
 
 
+
 # Part II: Load exFINDER database (and optional ligand-receptor database)
 
 *exFINDER database* is available for human, mouse, and zebrafish. *ligand-receptor database* is used for inferring functionally related signaling pathways from the exSigNet, here we use the ligand-receptor database from CellChat.
@@ -155,13 +156,31 @@ target.gene <- marker$X[1:10]
 ltGRN <- get_ltGRN(Target = target.gene, DB = exFINDER.M)
 ```
 
+
+## Setup the cutoff thresholds for "barely expressed genes" and "highly expressed genes" for NC cells
+```{r}
+# Check the average expression levels in each cell population group
+percentile_data <- get_percentile(Exp.Data = exp.data,
+               Meta.Data = meta.data,
+               percentile = c(.5, .75, .90))
+
+p <- ggplot(data=percentile_data, aes(x=Type, y=Ave.Exp., color=Prob.)) +
+  geom_point(size=3) +
+  theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5))
+
+p
+# ggsave(p, filename="Faure2020_Mouse_Part1_percentile.pdf")
+```
+
+
 ## Identify external signals and infer exSigNet
 ```{r}
 # infer potential external signals from ltGRN
 Pex <- get_potentialex(Graph = ltGRN,
                 Exp.Data = exp.data,
                 Meta.Data = meta.data,
-                cutoff = -0.15,
+                cutoff = -0.1,
                 AG.L = NULL)
 head(Pex)
 ```
@@ -251,37 +270,16 @@ pheatmap(exS_exp.HP,
 
 
 ### Visualize the exSigNet via hierarchy plot
-
-```{r}
-# prepare for hierarchy plot
-Graph <- exSigNet
-
-hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
-all_leaves <- Graph$Graph.Node$Gene
-
-connect <- data.frame(from = Graph$Graph.Edge$from, to = Graph$Graph.Edge$to)
-connect$value <- Graph$Graph.Edge$Weight
-
-vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))),
-                       Expression = c(0, Graph$Graph.Node$Size)) 
-vertices$node <- c(" ", Graph$Graph.Node$Gene)
-vertices$Role <- c("NA", Graph$Graph.Node$Role)
-
-mygraph <- igraph::graph_from_data_frame( hierarchy, vertices=vertices )
-
-from <- match( connect$from, vertices$name)
-to <- match( connect$to, vertices$name)
-weight <- connect$value
-
-```
-
-
 ```{r, fig.width=8,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
 # hierarchy plot
-ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+exSigNet_plot <- get_readyforplot(Graph = exSigNet)
+
+ggraph(exSigNet_plot[[1]], layout = 'dendrogram', circular = TRUE) + 
   geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
   theme_void() +
-  geom_conn_bundle(data = get_con(from = from, to = to, Strength = weight), width = 1.0, aes(colour=Strength),
+  geom_conn_bundle(data = get_con(from = exSigNet_plot[[2]]$from, 
+                                  to = exSigNet_plot[[2]]$to,
+                                  Strength = exSigNet_plot[[2]]$weight), width = 1.0, aes(colour=Strength),
                    arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
   scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
   geom_node_text(aes(label = node)) +
@@ -380,8 +378,6 @@ desc_stats = round(desc_stats, 1)
 library(factoextra)
 library(cluster)
 
-res = get_clust_tendency(USArrests, 10, graph = TRUE)
-
 # scale the similarity matrix
 df = scale(df)
 df = df[, colSums(is.na(df)) != nrow(df)]
@@ -431,35 +427,17 @@ data.AcI %>%
 ```
 
 
-```{r}
-# prepare for hierarchy plot 
-Graph <- exSigNet.Path[[1]]
-
-hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
-all_leaves <- Graph$Graph.Node$Gene
-
-connect <- data.frame(from = Graph$Graph.Edge$from, to = Graph$Graph.Edge$to)
-connect$value <- Graph$Graph.Edge$Weight
-
-vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))),
-                       Expression = c(0, Graph$Graph.Node$Size)) 
-vertices$node <- c(" ", Graph$Graph.Node$Gene)
-vertices$Role <- c("NA", Graph$Graph.Node$Role)
-
-mygraph <- igraph::graph_from_data_frame( hierarchy, vertices=vertices )
-
-from <- match( connect$from, vertices$name)
-to <- match( connect$to, vertices$name)
-weight <- connect$value
-```
-
 
 ```{r, fig.width=8,fig.height = 6, fig.wide = TRUE, fig.align = "center"}
 # hierarchy plot
-ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+exSigNet.Path_plot <- get_readyforplot(Graph = exSigNet.Path[[1]])
+
+ggraph(exSigNet.Path_plot[[1]], layout = 'dendrogram', circular = TRUE) + 
   geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
   theme_void() +  
-  geom_conn_bundle(data = get_con(from = from, to = to, Strength = weight), width = 0.75, aes(colour=Strength),
+  geom_conn_bundle(data = get_con(from = exSigNet.Path_plot[[2]]$from, 
+                                  to = exSigNet.Path_plot[[2]]$to, 
+                                  Strength = exSigNet.Path_plot[[2]]$weight), width = 0.75, aes(colour=Strength),
                    arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
   scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
   geom_node_text(aes(label = node)) +
@@ -467,7 +445,9 @@ ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
 ```
 
 
-
+```{r}
+exSigNet.Path
+```
 
 # Part VII: Evaluate GO analysis results
 

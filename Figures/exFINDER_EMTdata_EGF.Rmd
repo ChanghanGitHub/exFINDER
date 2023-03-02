@@ -1,0 +1,288 @@
+---
+title: "exFINDER_EMTdata_TGFB1"
+author: "Changhan"
+date: "2023-02-22"
+output: html_document
+---
+
+## Load required packages
+```{r}
+library(Seurat)
+library(cowplot)
+library(ggplot2)
+library(dplyr)
+library(viridis)
+library(ggforce)
+library(pheatmap)
+library(fgsea)
+library(ggsci)
+library(RColorBrewer)
+library(forcats)
+```
+
+## Set up exFINDER
+################################################################################
+```{r message=FALSE,warning=FALSE}
+library(exFINDER)
+library(patchwork)
+library(pheatmap)
+library(ggraph)
+```
+
+
+```{r}
+# load exFINDER database
+load("../data/LR_layer1_human.rda")
+load("../data/RTF_layer2_human.rda")
+load("../data/TFT_layer3_human.rda")
+
+exFINDER.H <- list()
+exFINDER.H[[1]] <- LR_layer1_human
+exFINDER.H[[2]] <- RTF_layer2_human
+exFINDER.H[[3]] <- TFT_layer3_human
+```
+################################################################################
+
+## Load data sets
+The datasets can be downloaded from: https://doi.org/10.1038/s41467-020-16066-2
+```{r}
+# Data1: a549
+Data12 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/A549/A549_EGF.rds")
+
+# Data2: du145
+Data22 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/DU145/DU145_EGF.rds")
+
+# Data3: mcf7
+Data32 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/MCF7/MCF7_EGF.rds")
+
+# Data4: ovca420
+Data42 <- readRDS("C:/Users/chang/Documents/Research_2021_Modeling/Project1/EMT_exFINDER/EMT_data/OVCA420/OVCA420_EGF.rds")
+
+regulons <- c("IRF7", "MYC", "RELB", "ATF4", "SOX4", "KLF6", "JUNB", "JUN", "ETS2", "SOX9", "BHLHE40", "EGR1", "FOSB",
+              "FOS", "ELF3", "SPDEF", "MYBL2", "E2F1", "CEBPD", "TFAP2C", "CEBPB", "FOSL1")
+inducers <- c("TGFB1", "EGF", "TNF")
+datasets <- c("A549", "DU145", "MCF7", "OVCA420")
+```
+
+
+################################################################################
+
+## relabel cells based on treatment
+```{r}
+Di <- 4 # dataset
+Dj <- 2 # inducer (fixed)
+Data1 <- Data42
+Data1 = UpdateSeuratObject(object = Data1)
+
+Data1@meta.data$Time2 <- as.factor(Data1@meta.data$Time)
+Data1@meta.data$Time2 <- fct_collapse(Data1@meta.data$Time2, 
+                                     "Before"="0d",
+                                     "On"=c("8h", "1d", "3d", "7d"),
+                                     "Off"=c("8h_rm", "1d_rm", "3d_rm"))
+Data1@meta.data$Time2 <- fct_drop(Data1@meta.data$Time2)
+
+Data1@active.ident <- Data1@meta.data$Time2
+names(Data1@active.ident) <- colnames(Data1@assays$RNA@data)
+Data1@meta.data$Type <- Data1@active.ident
+
+# inputs for exFINDER
+exp.data <- Data1@assays$RNA@data
+meta.data <- Data1@meta.data
+```
+
+
+## Setup the cutoff thresholds for "barely expressed genes" and "highly expressed genes" for NC cells
+```{r}
+# Check the average expression levels in each cell population group
+percentile_data <- get_percentile(Exp.Data = exp.data,
+               Meta.Data = meta.data,
+               percentile = c(.5, .75, .90))
+
+p <- ggplot(data=data123, aes(x=Type, y=Ave.Exp., color=Prob.)) +
+  geom_point(size=3) +
+  theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5))
+p
+
+# ggsave(p, filename=paste(datasets[Di], "_", inducers[Dj], "_percentile", ".pdf",sep=""))
+```
+
+
+
+```{r}
+data123$Ave.Exp.
+```
+
+
+## check measured/unmeasured inducers and expression levels
+```{r}
+get_AveExp(Gene = intersect(inducers, rownames(exp.data)),
+           Exp.Data = exp.data,
+           Meta.Data = meta.data)
+```
+
+
+
+################################################################################
+
+## exFINDER analysis
+```{r}
+# target: regulons
+target.gene <- regulons
+# infer lr-GRN
+ltGRN <- get_ltGRN(Target = target.gene, DB = exFINDER.H)
+
+# infer potential external signals from ltGRN
+# measured & low expressed ligands in the lrGRN
+Pex.1 <- get_potentialex(Graph = ltGRN,
+                Exp.Data = exp.data,
+                Meta.Data = meta.data,
+                cutoff = -0.065, # Dataset1: -0.07 Dataset2: -0.07 Dataset3: -0.065 Dataset4: -0.08
+                AG.L = c("Before"))
+
+# Pex.2: unmeasured ligands in the ltGRN
+L <- ltGRN$Graph.Node$Gene[ltGRN$Graph.Node$Role == "Ligand"]
+Pex.2 <- setdiff(L, rownames(exp.data))
+
+Pex.12 <- c(Pex.1, Pex.2)
+```
+
+
+
+################################################################################
+
+if the measured inducer is not a low expressed gene, then it cannot be identified as an external signal
+but exFINDER is still able to infer it corresponding signaling network based on the ltGRN
+```{r}
+intersect(ltGRN$Graph.Node$Gene[ltGRN$Graph.Node$Role == "Ligand"], inducers)
+```
+
+
+
+## infer the corresponding signaling network 
+```{r}
+L <- "EGF"
+
+exSigNet <- get_exSigNet(Graph = ltGRN,
+                       Ligands = L,
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       # dataset1&2: (0.4, 0.65) dataset3: (0.3, 0.65) dataset4: (0.4, 1.0)
+                       par.cutoff = c(0.4, 1.0), 
+                       AG.R = c("On"),
+                       AG.TF = c("On"))
+
+# fix the overlap issue
+exSigNet <- fix_OverLap(exSigNet)
+
+exSigNet <- get_NodeValue(Graph = exSigNet,
+                        Exp.Data = exp.data,
+                        Meta.Data = meta.data,
+                        AG.R = c("On"),
+                        AG.TF = c("On"),
+                        AG.T = c("On"),
+                        Exp.ExData = NULL,
+                        Meta.ExData = NULL,
+                        AG.ExData = NULL)
+
+
+# predict signaling strengths
+exSigNet <- get_EdgeWeight(Graph = exSigNet, 
+               Kh = 2)
+  
+exSigNet
+```
+
+
+
+## heatmap plot
+```{r}
+# if ligand is unmeasured, uncomment this part
+################################################################################
+# Gene_measured <- intersect(exSigNet$Graph.Node$Gene, rownames(exp.data))
+# Gene_UNmeasured <- setdiff(exSigNet$Graph.Node$Gene, rownames(exp.data))
+# UNmeasured_exp <- data.frame(Gene = Gene_UNmeasured, Before = 0, On  = 0, Off = 0)
+# 
+# 
+# exS_exp <- get_AveExp(Gene = Gene_measured,
+#            Exp.Data = exp.data,
+#            Meta.Data = meta.data)
+# 
+# exS_exp <- rbind(UNmeasured_exp, exS_exp)
+# 
+# exS_exp.HP <- exS_exp
+# exS_exp.HP <- exS_exp.HP[, -1]
+# row.names(exS_exp.HP) <- exS_exp$Gene
+################################################################################
+
+# if ligand is measured, uncomment this part
+################################################################################
+exS_exp <- get_AveExp(Gene = exSigNet$Graph.Node$Gene,
+           Exp.Data = exp.data,
+           Meta.Data = meta.data)
+
+exS_exp.HP <- exS_exp
+exS_exp.HP <- exS_exp.HP[, -1]
+row.names(exS_exp.HP) <- exS_exp$Gene
+################################################################################
+
+
+## customize the row labels and col labels
+annotation_row <- data.frame(Role = exSigNet$Graph.Node$Role)
+row.names(annotation_row) <- row.names(exS_exp.HP)
+
+
+# heatmap plot
+# bk <- c(seq(0,1.99,by=0.01), seq(2,4,by=0.01))
+
+nL <- length(exSigNet$Graph.Node$Gene[exSigNet$Graph.Node$Role == "Ligand"])
+nR <- length(exSigNet$Graph.Node$Gene[exSigNet$Graph.Node$Role == "Receptor"])
+nTF <- length(exSigNet$Graph.Node$Gene[exSigNet$Graph.Node$Role == "TF"])
+
+n1 <- nL
+n2 <- nL + nR
+n3 <- n2 + nTF
+
+p <- pheatmap(exS_exp.HP,
+         cluster_row = FALSE, cluster_cols = FALSE, 
+         cellwidth = 12, cellheight = 12,
+         gaps_row = c(n1, n2, n3),
+         fontsize_row = 10,
+         fontsize_col = 10,
+         annotation_row = annotation_row)
+p
+
+# ggsave(p, filename=paste(datasets[Di], "_", inducers[Dj], "_Heatmap_EGF", ".pdf",sep=""))
+```
+
+
+
+## hierarchy plot
+```{r}
+# prepare for hierarchy plot
+exSigNet_plot <- get_readyforplot(Graph = exSigNet)
+
+# hierarchy plot
+p <- ggraph(exSigNet_plot[[1]], layout = 'dendrogram', circular = TRUE) + 
+  geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
+  theme_void() +
+  geom_conn_bundle(data = get_con(from = exSigNet_plot[[2]]$from, 
+                                  to = exSigNet_plot[[2]]$to,
+                                  Strength = exSigNet_plot[[2]]$weight), width = 0.7, aes(colour=Strength),
+                   arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
+  scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
+  geom_node_text(aes(label = node)) +
+  scale_size_continuous( range = c(0.1,10) )
+p
+
+# ggsave(p, filename=paste(datasets[Di], "_", inducers[Dj], "_Dendrogram_EGF", ".pdf",sep=""))
+```
+
+
+
+
+
+
+
+
+

@@ -64,3 +64,38 @@ get_heatmap <- function(Gene,
 
   return(plot)
 }
+
+#' prepare the graph for hierarchy plot
+#'
+#' @param Graph exSigNet object (gene expressions and signaling strengths are required)
+#' @importFrom igraph graph_from_data_frame
+#'
+#' @return
+#' @export
+#'
+#' @examples
+get_readyforplot <- function(Graph){
+
+  hierarchy <- data.frame(from="origin", to=Graph$Graph.Node$Gene)
+  all_leaves <- Graph$Graph.Node$Gene
+
+  connect <- data.frame(from = Graph$Graph.Edge$from, to = Graph$Graph.Edge$to)
+  connect$value <- Graph$Graph.Edge$Weight
+
+  vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))),
+                         Expression = c(0, Graph$Graph.Node$Size))
+  vertices$node <- c(" ", Graph$Graph.Node$Gene)
+  vertices$Role <- c("NA", Graph$Graph.Node$Role)
+
+  mygraph <- igraph::graph_from_data_frame( hierarchy, vertices=vertices )
+
+  mygraph_2 <- data.frame(from <- match( connect$from, vertices$name),
+                          to <- match( connect$to, vertices$name),
+                          weight <- connect$value)
+
+  exSigNet_plot <- list()
+  exSigNet_plot[[1]] <- mygraph
+  exSigNet_plot[[2]] <- mygraph_2
+
+  return(exSigNet_plot)
+}

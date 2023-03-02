@@ -286,6 +286,31 @@ The "get_ltGRN" infers ligand-target GRN based on prior knowledge (exFINDER-DB).
 ltGRN <- get_ltGRN(Target = target.gene, DB = exFINDER.H)
 ```
 
+
+
+calculate the percentile values of cell groups for determining the cutoff thresholds for "barely expressed genes" and "highly expressed genes" in later analysis
+```{r}
+data.input = exp.data[, barcode[[5]]]
+meta.input = data.frame(Type = meta.data[barcode[[5]], ]$Type)
+meta.input$Type <- fct_drop(meta.input$Type)
+rownames(meta.input) <- barcode[[5]]
+
+# Check the average expression levels in each cell population group
+percentile_data <- get_percentile(Exp.Data = exp.data,
+               Meta.Data = meta.data,
+               percentile = c(.5, .75, .90))
+
+p <- ggplot(data=percentile_data, aes(x=Type, y=Ave.Exp., color=Prob.)) +
+  geom_point(size=3) +
+  theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5))
+
+p 
+# ggsave(p, filename="Benchmarking_percentile.pdf")
+```
+
+
+
 From the ltGRN, we can infer the corresponding receptors, TFs, and target genes highly expressed in the assigned cell groups, as well as the signaling network. 
 ```{r}
 # infer exSigNet (R, TF, T are all highly expressed, L comes from the potential external signals)
@@ -293,7 +318,7 @@ exSigNet <- get_exSigNet(Graph = ltGRN,
                        Ligands = "APOE",
                        Exp.Data = exp.data,
                        Meta.Data = meta.data,
-                       par.cutoff = c(1, 1), # cutoff expression levels
+                       par.cutoff = c(0.8, 0.8), # cutoff expression levels
                        AG.R = c('FBN1+FIB'), # select the receptors that highly expressed in the FBN1+ FIB cells
                        AG.TF = c('FBN1+FIB'))
 
@@ -364,7 +389,7 @@ exSigNet <- get_exSigNet(Graph = ltGRN,
                        Ligands = c(ligand, "APOE"), # compare the expression levels with APOE
                        Exp.Data = exp.data,
                        Meta.Data = meta.data,
-                       par.cutoff = c(1, 1), 
+                       par.cutoff = c(0.8, 0.8), 
                        AG.R = c('FBN1+FIB'),
                        AG.TF = c('FBN1+FIB'))
 
@@ -438,7 +463,7 @@ for (k in 1:4) {
   exS_0 <- get_potentialex(Graph = ltGRN,
                 Exp.Data = exp.data,
                 Meta.Data = meta.data,
-                cutoff = 1,
+                cutoff = 0, 
                 AG.L = c("LC", "cDC2", "FBN1+FIB", "APOE+FIB")) # ligands can come from any of the four cell groups
   exF_ligand[[5 + 5*(k-1)]] <- exS_0
   
@@ -454,8 +479,9 @@ for (k in 1:4) {
     exS_1 <- get_potentialex(Graph = ltGRN,
                 Exp.Data = data.input,
                 Meta.Data = meta.input,
-                cutoff = -1.0,
+                cutoff = -0.8,
                 AG.L = NULL)
+    
     exF_ligand[[i + 5*(k-1)]] <- exS_1
   }
   
@@ -475,12 +501,6 @@ for (j in 1:length(exF_ligand)) {
   }
 }
 
-
-```
-
-
-
-```{r}
 coverR[coverR == "NULL"] <- NaN
 coverR <- as.numeric(coverR)
 
@@ -493,12 +513,18 @@ df
 
 
 ```{r, fig.width=5,fig.height = 4, fig.wide = TRUE, fig.align = "center"}
-pheatmap(t(df),
+bk <- c(seq(0,0.59,by=0.01), seq(0.6,1,by=0.01))
+
+p <- pheatmap(t(df),
          cluster_row = FALSE, cluster_cols = FALSE, 
          cellwidth = 40, cellheight = 40,
          fontsize_row = 12,
          fontsize_col = 10,
-         angle_col = 45)
+         angle_col = 45,
+         color = c(colorRampPalette(colors = c("blue","white"))(length(bk)/2),colorRampPalette(colors = c("white","red"))(length(bk)/2)),
+         breaks=bk)
+p
+# ggsave(p, filename="Heatmap_Human_CC_exFINDER.pdf")
 ```
 
 

@@ -1,0 +1,540 @@
+---
+title: "CITE_seq_exFINDER"
+author: "Changhan"
+date: "2023-01-07"
+output: html_document
+---
+
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(Seurat)
+library(Matrix)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(plyr)
+
+# Set folder location for saving output files. This is also the same location as input data.
+mydir <- "C:/Users/chang/Documents/Research_2021_Modeling/Project1/CITE_seq_exFINDER/CBMC_data/"
+setwd("C:/Users/chang/Documents/Research_2021_Modeling/Project1/CITE_seq_exFINDER/") 
+
+# Objects to save.
+Rda.quickload.path <- paste0(mydir, "citeseq_quickload.Rda")  # datasets saved as sparse objects
+Rda.RNA.path <- paste0(mydir, "citeseq_RNA.Rda")  # cbmc clustered using RNA
+Rda.multi.path <- paste0(mydir, "citesq_cbmc_multi.rda")  # cbmc clustered and ADT added as an assay
+Rda.protein.path <- paste0(mydir, "citeseq_protein.Rda")  # cbmc clustered using protein
+```
+
+
+
+```{r}
+# Load in the RNA UMI matrix
+
+# Note that this dataset also contains ~5% of mouse cells, which we can use
+# as negative controls for the protein measurements. For this reason, the
+# gene expression matrix has HUMAN_ or MOUSE_ appended to the beginning of
+# each gene.
+
+cbmc.rna <- as.sparse(read.csv(paste0(mydir, "GSE100866_CBMC_8K_13AB_10X-RNA_umi.csv.gz"), sep = ",", header = TRUE, row.names = 1))
+cbmc.rna[20400:20403,1:2]
+
+# To make life a bit easier going forward, we're going to discard all but
+# the top 100 most highly expressed mouse genes, and remove the 'HUMAN_'
+# from the CITE-seq prefix
+cbmc.rna <- CollapseSpeciesExpressionMatrix(cbmc.rna, prefix = "HUMAN_", controls = "MOUSE_")
+
+# Load in the ADT UMI matrix
+cbmc.adt <- as.sparse(read.csv(paste0(mydir, "GSE100866_CBMC_8K_13AB_10X-ADT_umi.csv.gz"), sep = ",", header = TRUE, row.names = 1))
+
+# When adding multimodal data to Seurat, it's okay to have duplicate feature names. Each set of
+# modal data (eg. RNA, ADT, etc.) is stored in its own Assay object.  One of these Assay objects
+# is called the 'default assay', meaning it's used for all analyses and visualization.  To pull
+# data from an assay that isn't the default, you can specify a key that's linked to an assay for
+# feature pulling.  To see all keys for all objects, use the Key function.  
+
+# Lastly, we observed poor enrichments for CCR5, CCR7, and CD10 - and therefore 
+# remove them from the matrix (optional)
+cbmc.adt <- cbmc.adt[setdiff(rownames(x = cbmc.adt), c("CCR5", "CCR7", "CD10")), ]
+
+# Look at structure of ADT matrix.
+cbmc.adt[1:10,1:3]
+
+# What fraction of cells in the ADT and RNA matrix overlap?
+length(intersect(colnames(cbmc.rna), colnames(cbmc.adt))) / length(union(colnames(cbmc.rna), colnames(cbmc.adt)))
+
+# Save current progress.
+save(cbmc.rna, cbmc.adt, file = Rda.quickload.path)
+```
+
+
+
+```{r}
+load(Rda.quickload.path)
+cbmc <- CreateSeuratObject(counts = cbmc.rna)
+```
+
+```{r}
+# This code sub-samples the data in order to speed up calculations and not use too much memory.
+# Idents(cbmc) <- "orig.ident"
+# cbmc <- subset(cbmc, downsample = 2000, seed = 1)
+# cbmc.adt <- cbmc.adt[, colnames(cbmc)]
+
+# standard log-normalization
+cbmc <- NormalizeData(cbmc)
+
+# choose ~1k variable features
+cbmc <- FindVariableFeatures(cbmc)
+
+# standard scaling (no regression)
+cbmc <- ScaleData(cbmc)
+```
+
+
+```{r}
+# Run PCA, select PCs for tSNE visualization and graph-based clustering
+cbmc <- RunPCA(cbmc, verbose = FALSE)
+ElbowPlot(cbmc, ndims = 50)
+```
+
+
+```{r}
+# Cluster the cells using the first 25 principal components.
+cbmc <- FindNeighbors(cbmc, dims = 1:25)
+```
+
+```{r}
+cbmc <- FindClusters(cbmc, resolution = 0.8)
+```
+
+
+
+```{r}
+cbmc <- RunTSNE(cbmc, dims = 1:25, method = "FIt-SNE")
+
+# Find the markers that define each cluster, and use these to annotate the
+# clusters, we use max.cells.per.ident to speed up the process
+cbmc.rna.markers <- FindAllMarkers(cbmc, max.cells.per.ident = 100, logfc.threshold = log(2), only.pos = TRUE, min.diff.pct = 0.3)
+```
+
+
+
+```{r}
+# Which cluster consists of mouse cells?
+cbmc.rna.markers %>% filter(cluster == 5)
+```
+
+```{r}
+cbmc.rna.markers %>% filter(cluster == 13)
+```
+
+```{r}
+# Note, for simplicity we are merging two CD14+ Monocyte clusters (that differ in expression of
+# HLA-DR genes) and NK clusters (that differ in cell cycle stage)
+new.cluster.ids <- c("Memory CD4 T", "CD14+ Mono", "Naive CD4 T", "NK", "CD14+ Mono", "Mouse", "B", "CD8 T", "CD16+ Mono", "T/Mono doublets", "NK", "CD34+", "Multiplets", "Mouse", "Eryth", "Mk", "Mouse", "DC", "pDCs")
+names(new.cluster.ids) <- levels(cbmc)
+cbmc <- RenameIdents(cbmc, new.cluster.ids)
+
+# Visualize clustering based on RNA.
+p <- DimPlot(cbmc, label = TRUE, reduction = "tsne") + NoLegend()
+p
+# ggsave(p, filename="Clustering_CBMC.pdf")
+```
+
+
+```{r}
+# Save current progress.
+# save(cbmc, cbmc.rna.markers, cbmc.adt, file = Rda.RNA.path)
+# To load the data, run the following command.
+# load(Rda.RNA.path)
+```
+
+
+```{r}
+# We will define an ADT assay, and store raw counts for it
+
+# If you are interested in how these data are internally stored, you can check out the Assay
+# class, which is defined in objects.R; note that all single-cell expression data, including RNA
+# data, are still stored in Assay objects, and can also be accessed using GetAssayData
+cbmc[["ADT"]] <- CreateAssayObject(counts = cbmc.adt)
+
+GetAssayData(cbmc, slot = "counts", assay = "ADT")[1:3,1:3]
+```
+
+
+```{r}
+cbmc[["ADT"]]@counts[1:3, 1:3]
+```
+
+```{r}
+cbmc <- NormalizeData(cbmc, assay = "ADT", normalization.method = "CLR")
+```
+
+```{r}
+cbmc <- ScaleData(cbmc, assay = "ADT")
+```
+
+```{r}
+DefaultAssay(cbmc) <- "RNA"
+
+# In this plot, protein (ADT) levels are on top, and RNA levels are on the bottom
+FeaturePlot(cbmc, features = c("adt_CD3", "adt_CD11c", "adt_CD8", "adt_CD16", "CD3E", "ITGAX", "CD8A", "FCGR3A"), min.cutoff = "q05", max.cutoff = "q95", ncol = 4)
+```
+
+
+```{r}
+# How do the gene and protein expression levels compare to one another?
+
+# Compare gene and protein expression levels for the other 6 antibodies.
+FeaturePlot(cbmc, features = c("adt_CD4", "adt_CD45RA", "adt_CD56", "adt_CD14", "adt_CD19", "adt_CD34", "CD4", "PTPRC", "NCAM1", "CD14", "CD19", "CD34"), min.cutoff = "q05", max.cutoff = "q95", ncol = 6)
+```
+
+
+
+
+```{r}
+protein_ADT <- rownames(cbmc@assays$ADT@data)
+gene_ADT <- c("CD3E", "CD4", "CD8A", "PTPRC", "NCAM1", "FCGR3A", "ITGAX", "CD14", "CD19", "CD34")
+```
+
+
+################################################################################
+```{r message=FALSE,warning=FALSE}
+library(exFINDER)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(RColorBrewer)
+library(dplyr)
+library(pheatmap)
+library(ggraph)
+```
+
+
+```{r}
+# load exFINDER database
+load("../data/LR_layer1_human.rda")
+load("../data/RTF_layer2_human.rda")
+load("../data/TFT_layer3_human.rda")
+
+exFINDER.H <- list()
+exFINDER.H[[1]] <- LR_layer1_human
+exFINDER.H[[2]] <- RTF_layer2_human
+exFINDER.H[[3]] <- TFT_layer3_human
+```
+
+
+```{r}
+Data1 <- cbmc
+Data1@meta.data$Type <- cbmc@active.ident
+
+library(forcats)
+Data1@meta.data$Type <- fct_collapse(Data1@meta.data$Type, 
+                                     "Memory_CD4_T"="Memory CD4 T",
+                                     "CD14+Mono"="CD14+ Mono",
+                                     "Naive_CD4_T"="Naive CD4 T",
+                                     "CD8_T"="CD8 T",
+                                     "CD16+Mono"="CD16+ Mono",
+                                     "T_Mono_doublets"="T/Mono doublets")
+Data1@meta.data$Type <- fct_drop(Data1@meta.data$Type)
+
+# dataset of NC cells 
+exp.data <- Data1@assays$RNA@data
+meta.data <- Data1@meta.data
+```
+
+
+```{r}
+levels(Data1@meta.data$Type)
+```
+
+## Setup the cutoff thresholds for "barely expressed genes" and "highly expressed genes" for NC cells
+```{r}
+# Check the average expression levels in each cell population group
+percentile_data <- get_percentile(Exp.Data = exp.data,
+               Meta.Data = meta.data,
+               percentile = NULL)
+
+p <- ggplot(data=percentile_data, aes(x=Type, y=Ave.Exp., color=Prob.)) +
+  geom_point(size=3) +
+  theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 0.5, vjust = 0.5))
+
+p
+# ggsave(p, filename="CBMC_percentile.pdf")
+```
+
+
+```{r}
+K <- 4
+
+marker <- cbmc.rna.markers %>% filter(cluster == (K-1))
+target.gene <- marker$gene[1:10]
+ltGRN <- get_ltGRN(Target = target.gene, DB = exFINDER.H)
+
+# infer potential external signals from ltGRN
+# may be highly expressed in the non-NC cells or external environment
+Pex <- get_potentialex(Graph = ltGRN,
+                Exp.Data = exp.data,
+                Meta.Data = meta.data,
+                cutoff = -0.1,
+                AG.L = NULL)
+# head(Pex)
+
+# infer exSigNet (R, TF, T are all highly expressed, L comes from the potential external signals)
+exSigNet <- get_exSigNet(Graph = ltGRN,
+                       Ligands = Pex,
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(1.2, 1.5), 
+                       AG.R = NULL,
+                       AG.TF = levels(Data1@meta.data$Type)[K])
+
+# fix the overlap issue
+exSigNet <- fix_OverLap(exSigNet)
+```
+
+
+```{r}
+# based on this "exSigNet", we identify the receptors that only activated by these external signals
+exSigNet <- filterLR_exSigNet(Graph = exSigNet,
+                  Exp.Data = exp.data,
+                  DB = exFINDER.H)
+exSigNet
+```
+
+```{r}
+exSigNet$Graph.Node$Gene[exSigNet$Graph.Node$Role == "Ligand"]
+intersect(exSigNet$Graph.Node$Gene[exSigNet$Graph.Node$Role == "Ligand"], gene_ADT)
+```
+
+
+```{r}
+# calculate the expression levels
+exSigNet <- get_NodeValue(Graph = exSigNet,
+                          Exp.Data = exp.data,
+                          Meta.Data = meta.data,
+                          AG.R = NULL,
+                          AG.TF = levels(Data1@meta.data$Type)[K],
+                          AG.T = levels(Data1@meta.data$Type)[K],
+                          # if there is no expresison data for ligands, exFINDER will set them to 1.
+                          Exp.ExData = NULL,
+                          Meta.ExData = NULL,
+                          AG.ExData = NULL)
+
+# predict signaling strengths
+exSigNet <- get_EdgeWeight(Graph = exSigNet, 
+               Kh = 2)
+
+exSigNet
+```
+
+
+```{r}
+exS_exp <- get_AveExp(Gene = exSigNet$Graph.Node$Gene,
+           Exp.Data = exp.data,
+           Meta.Data = meta.data)
+
+exS_exp.HP <- exS_exp
+exS_exp.HP <- exS_exp.HP[, -1]
+row.names(exS_exp.HP) <- exS_exp$Gene
+
+## customize the row labels and col labels
+annotation_row <- data.frame(Role = exSigNet$Graph.Node$Role)
+row.names(annotation_row) <- row.names(exS_exp.HP)
+
+
+# heatmap plot
+# bk <- c(seq(0,1.99,by=0.01), seq(2,4,by=0.01))
+
+p <- pheatmap(exS_exp.HP,
+         cluster_row = FALSE, cluster_cols = FALSE, 
+         cellwidth = 12, cellheight = 12,
+         gaps_row = c(6, 11, 16),
+         fontsize_row = 10,
+         fontsize_col = 10,
+         annotation_row = annotation_row)
+p
+# ggsave(p, filename="CBMC_Heatmap_1.pdf")
+```
+
+## hierarchy plot
+```{r}
+# prepare for hierarchy plot
+exSigNet_plot <- get_readyforplot(Graph = exSigNet)
+
+# hierarchy plot
+p <- ggraph(exSigNet_plot[[1]], layout = 'dendrogram', circular = TRUE) + 
+  geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
+  theme_void() +
+  geom_conn_bundle(data = get_con(from = exSigNet_plot[[2]]$from, 
+                                  to = exSigNet_plot[[2]]$to, 
+                                  Strength = exSigNet_plot[[2]]$weight), width = 0.7, aes(colour=Strength),
+                   arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
+  scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
+  geom_node_text(aes(label = node)) +
+  scale_size_continuous( range = c(0.1,10) )
+p
+
+# ggsave(p, filename="CBMC_Dendrogram_1.pdf")
+```
+
+
+################################################################################
+```{r}
+levels(Data1@meta.data$Type)
+```
+
+
+```{r}
+marker.1 <- cbmc.rna.markers %>% filter(cluster == 0)
+marker.3 <- cbmc.rna.markers %>% filter(cluster == 2)
+marker.4 <- cbmc.rna.markers %>% filter(cluster == 3)
+target.gene <- c(marker.4$gene[1:10])
+ltGRN <- get_ltGRN(Target = target.gene, DB = exFINDER.H)
+```
+
+```{r}
+Pex <- get_potentialex(Graph = ltGRN,
+                Exp.Data = exp.data,
+                Meta.Data = meta.data,
+                cutoff = -0.1,
+                AG.L = c("CD14+Mono", "CD16+Mono"))
+```
+
+
+```{r}
+intersect(Pex, gene_ADT)
+
+get_AveExp(Gene = intersect(Pex, gene_ADT),
+           Exp.Data = exp.data,
+           Meta.Data = meta.data)
+```
+
+
+
+
+```{r}
+exSigNet <- get_exSigNet(Graph = ltGRN,
+                       Ligands = Pex,
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(0.5, 0.5), 
+                       AG.R = NULL,
+                       AG.TF = NULL)
+
+exSigNet
+```
+
+
+```{r}
+intersect(Pex, gene_ADT)
+
+exSigNet <- get_exSigNet(Graph = ltGRN,
+                       Ligands = intersect(Pex, gene_ADT),
+                       Exp.Data = exp.data,
+                       Meta.Data = meta.data,
+                       par.cutoff = c(0.6, 0.6), 
+                       AG.R = NULL,
+                       AG.TF = NULL)
+
+# fix the overlap issue
+# exSigNet <- fix_OverLap(exSigNet)
+
+exSigNet
+```
+
+```{r}
+# calculate the expression levels
+exSigNet <- get_NodeValue(Graph = exSigNet,
+                          Exp.Data = exp.data,
+                          Meta.Data = meta.data,
+                          AG.R = NULL,
+                          AG.TF = NULL,
+                          AG.T = c("NK"),
+                          # if there is no expresison data for ligands, exFINDER will set them to 1.
+                          Exp.ExData = exp.data,
+                          Meta.ExData = meta.data,
+                          AG.ExData = c("CD14+Mono", "CD16+Mono"))
+
+# predict signaling strengths
+exSigNet <- get_EdgeWeight(Graph = exSigNet, 
+               Kh = 2)
+```
+
+
+
+```{r}
+exS_exp <- get_AveExp(Gene = exSigNet$Graph.Node$Gene,
+           Exp.Data = exp.data,
+           Meta.Data = meta.data)
+
+exS_exp.HP <- exS_exp
+exS_exp.HP <- exS_exp.HP[, -1]
+row.names(exS_exp.HP) <- exS_exp$Gene
+
+## customize the row labels and col labels
+annotation_row <- data.frame(Role = exSigNet$Graph.Node$Role)
+row.names(annotation_row) <- row.names(exS_exp.HP)
+
+
+# heatmap plot
+# bk <- c(seq(0,1.99,by=0.01), seq(2,4,by=0.01))
+
+p <- pheatmap(exS_exp.HP,
+         cluster_row = FALSE, cluster_cols = FALSE, 
+         cellwidth = 12, cellheight = 12,
+         gaps_row = c(1, 2, 4),
+         fontsize_row = 10,
+         fontsize_col = 10,
+         annotation_row = annotation_row)
+p
+# ggsave(p, filename="CBMC_Heatmap_2.pdf")
+```
+
+## hierarchy plot
+```{r}
+# prepare for hierarchy plot
+exSigNet.2_plot <- get_readyforplot(Graph = exSigNet)
+
+# hierarchy plot
+p <- ggraph(exSigNet.2_plot[[1]], layout = 'dendrogram', circular = TRUE) + 
+  geom_node_point(aes(filter = leaf, x=x, y=y, colour=Role, size=Expression)) +
+  theme_void() +
+  geom_conn_bundle(data = get_con(from = exSigNet.2_plot[[2]]$from, 
+                                  to = exSigNet.2_plot[[2]]$to, 
+                                  Strength = exSigNet.2_plot[[2]]$weight), width = 0.7, aes(colour=Strength),
+                   arrow = arrow(length = unit(3, 'mm')), start_cap = circle(3, 'mm'), end_cap = circle(3, 'mm')) +
+  scale_edge_color_continuous(low="#80b1d3", high="#FF7F24")+
+  geom_node_text(aes(label = node)) +
+  scale_size_continuous( range = c(0.1,10) )
+p
+
+# ggsave(p, filename="CBMC_Dendrogram_2.pdf")
+```
+
+```{r}
+DefaultAssay(cbmc) <- "RNA"
+
+# In this plot, protein (ADT) levels are on top, and RNA levels are on the bottom
+p <- FeaturePlot(cbmc, features = c("CD34", "adt_CD34"), min.cutoff = "q05", max.cutoff = "q95", ncol = 2)
+p
+# ggsave(p, filename="ADT_RNA_CD34.pdf")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

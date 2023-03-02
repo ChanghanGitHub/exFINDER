@@ -116,20 +116,39 @@ get_NodeValue <- function(Graph,
   Value.T <- T.Exp$Max_AveExp
 
   # calculate ligand (external signal)
+  Value.L <- c()
   if ( (is.null(Exp.ExData) == FALSE)&(is.null(Meta.ExData) == FALSE) ){
+    for (i in 1:length(Node.L)) {
 
-    L.Exp <- get_AveExp(Gene = Node.L,
-                        Exp.Data = Exp.ExData,
-                        Meta.Data = Meta.ExData)
+      if (length(intersect(Node.L[i], row.names(Exp.ExData)))==0){
+        Value.L <- c(Value.L, 1)
+      }else{
+        L.Exp <- get_AveExp(Gene = Node.L[i],
+                            Exp.Data = Exp.ExData,
+                            Meta.Data = Meta.ExData)
 
-    if (length(AG.ExData)!=0){
-      L.Exp <- L.Exp[, c('Gene', AG.ExData)]
-      L.Exp <- get_RowMax(L.Exp)
-    } else if (length(AG.ExData)==0){
-      L.Exp <- get_RowMax(L.Exp)
-    }
-    Value.L <- L.Exp$Max_AveExp
-  }else { Value.L <- rep(1, length(Node.L)) }
+        if (length(AG.ExData)!=0){
+          L.Exp <- L.Exp[, c('Gene', AG.ExData)]
+          L.Exp <- get_RowMax(L.Exp)
+        } else if (length(AG.ExData)==0){
+          L.Exp <- get_RowMax(L.Exp)
+        }
+        Value.L <- c(Value.L, L.Exp$Max_AveExp)
+      }
+    }}else { Value.L <- c(Value.L, rep(1, length(Node.L))) }
+
+  #   L.Exp <- get_AveExp(Gene = Node.L,
+  #                       Exp.Data = Exp.ExData,
+  #                       Meta.Data = Meta.ExData)
+  #
+  #   if (length(AG.ExData)!=0){
+  #     L.Exp <- L.Exp[, c('Gene', AG.ExData)]
+  #     L.Exp <- get_RowMax(L.Exp)
+  #   } else if (length(AG.ExData)==0){
+  #     L.Exp <- get_RowMax(L.Exp)
+  #   }
+  #   Value.L <- L.Exp$Max_AveExp
+  # }else { Value.L <- rep(1, length(Node.L)) }
 
   Value <- c(Value.L, Value.R, Value.TF, Value.T)
 
