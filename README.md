@@ -10,7 +10,7 @@ exFINDER is a method that identifies external signals (received signals from the
 
 ## Installation
 
-exFINDER R package can be easily installed from Github using devtools:  
+exFINDER R package can be easily installed from Github using devtools (it may take a little while):  
 
 ```
 devtools::install_github("ChanghanGitHub/exFINDER")
