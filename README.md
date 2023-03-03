@@ -1,7 +1,7 @@
 # exFINDER: Identifying external communication signals using single-cell transcriptomics data
 
 ## Introduction
-exFINDER is a method that identifies such external signals received by the cells in the single-cell transcriptomics datasets by utilizing the prior knowledge of signaling pathways. Specifically,exFINDER contains the following features:
+exFINDER is a method that identifies external signals (received signals from the external system) in the single-cell transcriptomics datasets by utilizing the prior knowledge of signaling pathways. Specifically,exFINDER contains the following features:
 
 - It develops a computational method that links the prior knowledge and scRNA-seq data to identify the external signals received by the cells. 
 - It uses a computational model that utilizes the graph theory to infer the external signal-target signaling networks (exSigNet) and link the expression data to signaling strength. 
