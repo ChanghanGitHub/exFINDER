@@ -184,7 +184,7 @@ calculate the percentile values of cell groups for determining the cutoff thresh
 ```{r}
 data4 <- get_percentile(Exp.Data = exp.Exdata,
                Meta.Data = meta.Exdata,
-               percentile = c(.5, .75, .90))
+               percentile = NULL)
 
 ggplot(data=data4, aes(x=Type, y=Ave.Exp., color=Prob.)) +
   geom_point(size=3) +
