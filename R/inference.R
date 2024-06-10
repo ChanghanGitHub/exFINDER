@@ -46,7 +46,7 @@ get_ltGRN <- function(Target,
   T.2 <- unique(Layer3$to)
 
   T.diff <- setdiff(Target, T.2)
-  if (length(T.diff) == 0) {
+  if (length(T.diff) != 0) {
     warning("The following target genes have been ignored: ", T.diff ,"\n")}
 
   Graph.Edge <- rbind(Layer1, Layer2, Layer3)
